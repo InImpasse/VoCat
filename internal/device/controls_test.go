@@ -121,6 +121,17 @@ func newStartedNativeQMITestManager(t *testing.T) (*Manager, *staticOpener, stri
 
 func TestSetFlightUsesQMIDMSForNativeWWAN(t *testing.T) {
 	manager, atOpener, id := newStartedNativeQMITestManager(t)
+	// This test covers the synchronous DMS flight-mode path. Production opens a
+	// separate QMI session for the asynchronous NAS reconcile; block that
+	// unrelated path so this shared radio fake is never used by two goroutines.
+	manager.nativeQMIRegistrationMu.Lock()
+	manager.nativeQMIRegistrationInFlight[id] = struct{}{}
+	manager.nativeQMIRegistrationMu.Unlock()
+	defer func() {
+		manager.nativeQMIRegistrationMu.Lock()
+		delete(manager.nativeQMIRegistrationInFlight, id)
+		manager.nativeQMIRegistrationMu.Unlock()
+	}()
 	session := &fakeQMIRadioSession{mode: qmi.ModeOffline}
 	var openedPath string
 	manager.qmiRadioOpener = func(_ context.Context, path string) (qmiRadioSession, error) {

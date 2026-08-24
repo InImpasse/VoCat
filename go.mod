@@ -2,6 +2,8 @@ module vocat
 
 go 1.25.0
 
+toolchain go1.26.7
+
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/iniwex5/quectel-qmi-go v0.6.0

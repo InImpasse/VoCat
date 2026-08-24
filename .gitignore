@@ -6,6 +6,7 @@
 /build/vocat
 /build/vocat-linux-amd64
 /build/vocat-linux-amd64.exe
+/dist/hardened/
 *.exe
 *.dll
 *.so
@@ -42,6 +43,7 @@ build/*.py
 # ---- Docs / scratch ----
 *.md
 !README.md
+!AGENTS.md
 !docs/**/*.md
 *.txt
 build/lists/

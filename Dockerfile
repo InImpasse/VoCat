@@ -1,18 +1,18 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 
 # Build toolchains run natively on the BuildKit host. Without BUILDPLATFORM,
 # the arm64 branch executes npm and the Go compiler through QEMU, which is much
 # slower and makes npm ci appear to hang despite producing no progress output.
 # ---- Stage 1: build the web frontend once on the native builder ----
-FROM --platform=$BUILDPLATFORM node:20-alpine AS web-builder
+FROM --platform=$BUILDPLATFORM node:24.15.0-alpine3.23@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f AS web-builder
 WORKDIR /web
-COPY web/package.json web/package-lock.json* ./
-RUN npm ci
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY web/ ./
 RUN npm run build
 
 # ---- Stage 2: cross-compile the Go binary on the native builder ----
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.26.7-alpine3.23@sha256:b17af760035fc2f338eed92d448a6c67f2d45438844fc6c60678fa5f99e44b57 AS go-builder
 RUN apk add --no-cache git
 WORKDIR /src
 
@@ -30,12 +30,12 @@ COPY --from=web-builder /web/dist ./web/dist
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
     -trimpath \
-    -ldflags "-s -w -X vocat/internal/buildinfo.Version=${VERSION} -X vocat/internal/buildinfo.BuildTime=${BUILD_TIME}" \
+    -ldflags "-w -X vocat/internal/buildinfo.Version=${VERSION} -X vocat/internal/buildinfo.BuildTime=${BUILD_TIME}" \
     -o /out/vocat \
     ./cmd/vocat
 
 # ---- Stage 3: minimal runtime ----
-FROM alpine:3.20
+FROM alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659
 RUN apk add --no-cache ca-certificates ccid iproute2 pcsc-lite qmi-utils tzdata && \
     addgroup -S -g 1000 vocat && \
     adduser -S -D -H -u 1000 -G vocat vocat
@@ -50,9 +50,9 @@ COPY scripts/docker-entrypoint.sh /usr/local/bin/vocat-entrypoint
 RUN ln -s /opt/vocat/bin/vocat /usr/local/bin/vocat && \
     chmod 0755 /usr/local/bin/vocat-entrypoint
 
-# Hardware access and the bundled pcscd daemon require root inside the
-# container. The container already needs host networking and privileged device
-# access for modem, QMI, IPsec, and hot-plug support.
+# This image is retained for local development only. Its entrypoint starts the
+# bundled pcscd before VoCat; production runs the binary as the unprivileged
+# vocat user under deploy/vocat.service in the dedicated VM.
 USER root
 VOLUME ["/opt/vocat/data"]
 EXPOSE 7575

@@ -1,158 +1,17 @@
-name: release-binaries
+name: release-binaries-disabled
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  web:
+  publishing-disabled:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Build embedded web UI
-        working-directory: web
+      - name: Public publishing is disabled
+        shell: bash
         run: |
-          npm ci --no-audit --no-fund
-          npm run build
-      - name: Upload embedded web UI
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-dist
-          path: web/dist
-          if-no-files-found: error
-          retention-days: 1
-
-  test:
-    needs: web
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Download embedded web UI
-        uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: web/dist
-      - name: Test
-        run: go test ./...
-
-  binaries:
-    needs: [web, test]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-amd64
-            goarch: amd64
-            goarm: ""
-            filename: vocat-linux-amd64
-          - target: linux-386
-            goarch: "386"
-            goarm: ""
-            filename: vocat-linux-386
-          - target: linux-arm64
-            goarch: arm64
-            goarm: ""
-            filename: vocat-linux-arm64
-          - target: linux-aarch64
-            goarch: arm64
-            goarm: ""
-            filename: vocat-linux-aarch64
-          - target: linux-armv7
-            goarch: arm
-            goarm: "7"
-            filename: vocat-linux-armv7
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Download embedded web UI
-        uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: web/dist
-      - name: Set up QEMU for ARM64 runtime smoke test
-        if: matrix.goarch == 'arm64'
-        uses: docker/setup-qemu-action@v3
-      - name: Build ${{ matrix.target }}
-        env:
-          GOOS: linux
-          GOARCH: ${{ matrix.goarch }}
-          GOARM: ${{ matrix.goarm }}
-          CGO_ENABLED: "0"
-          OUTPUT: dist/${{ matrix.filename }}
-          VERSION: ${{ github.ref_name }}
-        run: |
-          mkdir -p dist
-          VERSION="${VERSION#v}"
-          BUILD_TIME="$(git show -s --format=%cI HEAD)"
-          go build -trimpath \
-            -ldflags "-s -w -X vocat/internal/buildinfo.Version=${VERSION} -X vocat/internal/buildinfo.BuildTime=${BUILD_TIME}" \
-            -o "$OUTPUT" \
-            ./cmd/vocat
-          chmod 0755 "$OUTPUT"
-          if readelf -l "$OUTPUT" | grep -q 'Requesting program interpreter'; then
-            echo "ERROR: $OUTPUT unexpectedly requires a dynamic loader" >&2
-            readelf -l "$OUTPUT" >&2
-            exit 1
-          fi
-          case "${{ matrix.goarch }}" in
-            amd64|arm64) "$OUTPUT" version ;;
-          esac
-      - name: Upload ${{ matrix.target }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: binary-${{ matrix.target }}
-          path: dist/${{ matrix.filename }}
-          if-no-files-found: error
-          retention-days: 1
-
-  github-release:
-    if: github.ref_type == 'tag'
-    needs: binaries
-    runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Download binaries
-        uses: actions/download-artifact@v4
-        with:
-          pattern: binary-*
-          path: dist
-          merge-multiple: true
-      - name: Generate checksums
-        working-directory: dist
-        run: sha256sum vocat-linux-* | sort > SHA256SUMS
-      - name: Create or update GitHub Release
-        run: |
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" dist/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "$GITHUB_REF_NAME" \
-              --generate-notes \
-              --verify-tag
-          fi
+          echo "::error title=Publishing disabled::Build reviewed commits locally with scripts/build-hardened.sh; this workflow cannot publish releases."
+          exit 1

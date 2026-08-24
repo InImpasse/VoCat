@@ -1,108 +1,17 @@
-name: docker
+name: docker-publishing-disabled
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  smoke:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            arch: amd64
-          - platform: linux/arm64
-            arch: arm64
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build ${{ matrix.platform }} smoke image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: ${{ matrix.platform }}
-          load: true
-          push: false
-          tags: vocat-smoke:${{ matrix.arch }}
-          build-args: |
-            VERSION=0.0.0-smoke
-            BUILD_TIME=${{ github.event.repository.updated_at }}
-          cache-from: type=gha
-
-      - name: Verify ${{ matrix.platform }} runtime, QMI, and smart-card stack
-        run: |
-          docker run --rm --platform '${{ matrix.platform }}' \
-            vocat-smoke:${{ matrix.arch }} version
-          docker run --rm --platform '${{ matrix.platform }}' \
-            --entrypoint /bin/sh vocat-smoke:${{ matrix.arch }} -c \
-            'command -v qmicli && command -v qmi-network && command -v pcscd && test -d /usr/lib/pcsc/drivers'
-
-  build-and-push:
-    needs: smoke
+  publishing-disabled:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Lowercase repository owner for ghcr.io
-        id: repo
-        run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
-
-      - name: Derive version from tag
-        id: version
+      - name: Public publishing is disabled
+        shell: bash
         run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
-          fi
-          echo "build_time=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push multi-arch image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          build-args: |
-            VERSION=${{ steps.version.outputs.version }}
-            BUILD_TIME=${{ steps.version.outputs.build_time }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}:latest
-            ${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}:${{ steps.version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          echo "::error title=Publishing disabled::Build reviewed commits locally with scripts/build-hardened.sh; this workflow cannot publish container images."
+          exit 1

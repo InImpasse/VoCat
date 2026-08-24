@@ -224,4 +224,11 @@ func TestSecurityCandidateWorkflowIsReadOnlyAndCannotPublish(t *testing.T) {
 	if count := strings.Count(workflow, "uses:"); count != 2 {
 		t.Errorf("security candidate workflow must contain exactly two pinned Actions, got %d", count)
 	}
+	steps := strings.Index(workflow, "\n    steps:\n")
+	if steps < 0 {
+		t.Fatal("security candidate workflow has no steps section")
+	}
+	if strings.Contains(workflow[:steps], "${{ runner.") {
+		t.Fatal("runner context is unavailable before workflow steps")
+	}
 }

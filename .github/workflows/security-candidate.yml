@@ -22,8 +22,6 @@ jobs:
     name: Build and scan linux/amd64 candidate
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    env:
-      VOCAT_BUILD_CACHE_ROOT: ${{ runner.temp }}/vocat-cache
 
     steps:
       - name: Check out the candidate commit
@@ -39,6 +37,8 @@ jobs:
 
       - name: Build and verify candidate
         shell: bash
+        env:
+          VOCAT_BUILD_CACHE_ROOT: ${{ runner.temp }}/vocat-cache
         run: scripts/build-hardened.sh amd64
 
       - name: Upload candidate evidence

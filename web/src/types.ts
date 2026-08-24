@@ -441,6 +441,7 @@ export interface SecuritySettings {
   mode: "internal" | "public";
   allowedCidrs: string[];
   trustProxyHeaders: boolean;
+  trustedProxyCidrs: string[];
   clientIp: string;
   clientAllowed: boolean;
 }

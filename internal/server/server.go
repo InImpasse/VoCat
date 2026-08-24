@@ -46,6 +46,7 @@ type Options struct {
 	Extensions          *extensions.Manager
 	ExportProxy         *exportproxy.Manager
 	DeveloperEnabled    bool
+	UpdatesEnabled      bool
 	UpdateRepository    string
 	UpdateToken         string
 	HTTPS               *httpsmode.Manager
@@ -74,11 +75,13 @@ type Server struct {
 	extensions                *extensions.Manager
 	exportProxy               *exportproxy.Manager
 	developerEnabled          bool
+	updatesEnabled            bool
 	updateRepository          string
 	updateToken               string
 	updateCheck               func(context.Context, string, string, string) (update.CheckResult, error)
 	updateApply               func(context.Context, *slog.Logger, update.Options, bool) (update.CheckResult, error)
 	updateRestart             func(*slog.Logger) error
+	runningInContainer        func() bool
 	updateMu                  sync.Mutex
 	updateApplying            bool
 	https                     *httpsmode.Manager
@@ -115,10 +118,6 @@ func New(options Options) (*Server, error) {
 	if options.MaxRequestBodyBytes <= 0 {
 		options.MaxRequestBodyBytes = 1 << 20
 	}
-	if strings.TrimSpace(options.UpdateRepository) == "" {
-		options.UpdateRepository = update.DefaultRepository
-	}
-
 	server := &Server{
 		store:               options.Store,
 		auth:                options.Auth,
@@ -138,6 +137,7 @@ func New(options Options) (*Server, error) {
 		extensions:          options.Extensions,
 		exportProxy:         options.ExportProxy,
 		developerEnabled:    options.DeveloperEnabled,
+		updatesEnabled:      options.UpdatesEnabled,
 		updateRepository:    strings.TrimSpace(options.UpdateRepository),
 		updateToken:         strings.TrimSpace(options.UpdateToken),
 		https:               options.HTTPS,
@@ -145,9 +145,12 @@ func New(options Options) (*Server, error) {
 		hostStats:           newHostStatsSampler(),
 		publicIPs:           make(map[string]cachedPublicIP),
 		lookupPublicIP:      exportproxy.LookupPublicIP,
-		updateCheck:         update.CheckLatest,
-		updateApply:         update.ApplyLatest,
-		updateRestart:       update.RestartService,
+		runningInContainer:  runningInDocker,
+	}
+	if options.UpdatesEnabled && server.updateRepository != "" {
+		server.updateCheck = update.CheckLatest
+		server.updateApply = update.ApplyLatest
+		server.updateRestart = update.RestartService
 	}
 	server.cellularDataRuntime()
 	server.loadAccessConfig(context.Background())
@@ -236,20 +239,27 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limiterKey := s.loginKey(r, request.Username)
-	if retryAfter, locked := s.loginLimiter.checkLocked(limiterKey); locked {
-		s.auditAuth(r, request.Username, "locked")
-		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(retryAfter.Seconds())+1))
+	clientIP := s.currentAccessConfig().clientIP(r).String()
+	if retryAfter, admitted := s.loginLimiter.begin(clientIP, request.Username); !admitted {
+		if s.loginLimiter.claimLockoutAudit(clientIP, request.Username) {
+			s.auditAuth(r, request.Username, "locked")
+		}
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfterSeconds(retryAfter)))
 		writeError(w, http.StatusTooManyRequests, "too_many_attempts", "too many failed login attempts; please try again later")
 		return
 	}
+	defer s.loginLimiter.end(clientIP, request.Username)
 
 	credentials, err := s.auth.Login(r.Context(), request.Username, request.Password)
 	if errors.Is(err, auth.ErrInvalidCredentials) {
-		lockout, newlyLocked := s.loginLimiter.recordFailure(limiterKey)
-		s.auditAuth(r, request.Username, "failure")
-		if newlyLocked {
-			w.Header().Set("Retry-After", fmt.Sprintf("%d", int(lockout.Seconds())))
+		lockout, locked := s.loginLimiter.recordFailure(clientIP, request.Username)
+		outcome := "failure"
+		if locked && s.loginLimiter.claimLockoutAudit(clientIP, request.Username) {
+			outcome = "locked"
+		}
+		s.auditAuth(r, request.Username, outcome)
+		if locked {
+			w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfterSeconds(lockout)))
 			writeError(w, http.StatusTooManyRequests, "too_many_attempts", "too many failed login attempts; please try again later")
 			return
 		}
@@ -262,7 +272,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.loginLimiter.recordSuccess(limiterKey)
+	s.loginLimiter.recordSuccess(clientIP, request.Username)
 	s.auditAuth(r, credentials.Principal.Username, "success")
 	s.setAuthCookies(w, credentials.SessionToken, credentials.CSRFToken, credentials.ExpiresAt)
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -276,11 +286,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// loginKey builds the rate-limit key from the client address and username so
-// brute-force attempts against one account from one source are throttled.
-func (s *Server) loginKey(r *http.Request, username string) string {
-	address := s.currentAccessConfig().clientIP(r)
-	return address.String() + "|" + strings.ToLower(strings.TrimSpace(username))
+func retryAfterSeconds(duration time.Duration) int {
+	seconds := int((duration + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		return 1
+	}
+	return seconds
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
@@ -660,11 +671,24 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 					"img-src 'self' data:; connect-src 'self'",
 			)
 		}
-		if s.secureCookies && s.https == nil {
+		if s.requestUsesHTTPS(r) {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) requestUsesHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	config := s.currentAccessConfig()
+	peer := directPeerIP(r.RemoteAddr)
+	if !config.trustProxy || !peer.IsValid() || !config.isTrustedProxy(peer) {
+		return false
+	}
+	forwardedProto := r.Header.Values("X-Forwarded-Proto")
+	return len(forwardedProto) == 1 && strings.EqualFold(strings.TrimSpace(forwardedProto[0]), "https")
 }
 
 func (s *Server) recoverPanics(next http.Handler) http.Handler {

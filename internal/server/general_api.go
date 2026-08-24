@@ -347,13 +347,14 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
-			"version":      buildinfo.Version,
-			"build_time":   buildinfo.BuildTime,
-			"config":       "VOCAT_CONFIG and environment",
-			"os":           runtime.GOOS,
-			"architecture": runtime.GOARCH,
-			"uptime":       formatDuration(time.Since(s.startedAt)),
-			"developer":    s.developerActive(r.Context()),
+			"version":       buildinfo.Version,
+			"build_time":    buildinfo.BuildTime,
+			"config":        "VOCAT_CONFIG and environment",
+			"os":            runtime.GOOS,
+			"architecture":  runtime.GOARCH,
+			"uptime":        formatDuration(time.Since(s.startedAt)),
+			"developer":     s.developerActive(r.Context()),
+			"update_policy": "external_deployment_only",
 		},
 	})
 }
@@ -366,12 +367,13 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	if strings.TrimSpace(s.updateRepository) == "" || s.updateCheck == nil {
+	if !s.updatesEnabled || strings.TrimSpace(s.updateRepository) == "" || s.updateCheck == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"data": map[string]any{
 				"available": false,
 				"version":   buildinfo.Version,
-				"message":   i18n.T("未配置受信任的软件更新源；不会从未知地址下载或执行文件。"),
+				"status":    "updates_disabled",
+				"message":   i18n.T("运行时自更新已禁用；请通过加固构建与部署流程更新。"),
 			},
 		})
 		return
@@ -400,7 +402,7 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 			"version":         result.Latest,
 			"message":         message,
 			"repository":      s.updateRepository,
-			"is_docker":       runningInDocker(),
+			"is_docker":       s.isContainerized(),
 		},
 	})
 }
@@ -412,20 +414,22 @@ func runningInDocker() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("VOCAT_CONTAINER")), "docker")
 }
 
+func (s *Server) isContainerized() bool {
+	if s.runningInContainer != nil {
+		return s.runningInContainer()
+	}
+	return runningInDocker()
+}
+
 func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	if strings.TrimSpace(s.updateRepository) == "" || s.updateApply == nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]any{
-				"applied": false,
-				"message": i18n.T("未配置受信任的软件更新源；未执行任何更新。"),
-			},
-		})
+	if !s.updatesEnabled || strings.TrimSpace(s.updateRepository) == "" || s.updateApply == nil {
+		writeError(w, http.StatusConflict, "updates_disabled", i18n.T("运行时自更新已禁用；请通过加固构建与部署流程更新。"))
 		return
 	}
-	if runningInDocker() {
+	if s.isContainerized() {
 		writeError(w, http.StatusConflict, "container_update_required", "pull the latest container image and recreate the container")
 		return
 	}
@@ -532,7 +536,7 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, auth.ErrInvalidCredentials):
 			writeError(w, http.StatusUnauthorized, "invalid_credentials", "current password is incorrect")
-		case errors.Is(err, auth.ErrEmptyPassword):
+		case errors.Is(err, auth.ErrPasswordPolicy):
 			writeError(w, http.StatusBadRequest, "weak_password", err.Error())
 		case strings.Contains(err.Error(), "must differ"):
 			writeError(w, http.StatusBadRequest, "password_reused", err.Error())

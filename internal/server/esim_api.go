@@ -89,7 +89,7 @@ func (s *Server) handleESIM(w http.ResponseWriter, r *http.Request, rest []strin
 			return true
 		}
 		if len(rest) == 2 && rest[1] == "download" {
-			if !requireMethod(w, r, http.MethodGet) {
+			if !requireMethod(w, r, http.MethodPost) {
 				return true
 			}
 			s.handleEsimDownload(w, r, physicalID, physicalPresent)
@@ -626,10 +626,10 @@ func (s *Server) handleEsimDelete(w http.ResponseWriter, r *http.Request, physic
 }
 
 // handleEsimDownload streams one eSIM profile download (写卡) as Server-Sent
-// Events. The SPA drives it with GET + query params (smdp/matching_id/
-// confirmation_code/aid_hex/imei) and reads `data: {step,msg,pct,...}` lines.
+// Events. The SPA sends the activation details in a JSON body and reads
+// `data: {step,msg,pct,...}` lines from the same POST response.
 // The event field names (step/msg/pct/code/space_delta/warning) match the
-// reference contract byte-for-byte, so the frontend needs no changes.
+// reference contract byte-for-byte, so progress rendering remains unchanged.
 func (s *Server) handleEsimDownload(w http.ResponseWriter, r *http.Request, physicalID string, physicalPresent bool) {
 	if s.devices == nil {
 		writeError(w, http.StatusServiceUnavailable, "device_manager_unavailable", "device manager is unavailable")
@@ -639,13 +639,23 @@ func (s *Server) handleEsimDownload(w http.ResponseWriter, r *http.Request, phys
 		writeError(w, http.StatusServiceUnavailable, "physical_device_missing", "the configured modem is not present on this Linux host")
 		return
 	}
-	query := r.URL.Query()
+	var request struct {
+		SMDP             string `json:"smdp"`
+		MatchingID       string `json:"matching_id"`
+		ConfirmationCode string `json:"confirmation_code"`
+		AIDHex           string `json:"aid_hex"`
+		IMEI             string `json:"imei"`
+	}
+	if err := s.decodeJSON(w, r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
 	params := device.EsimDownloadParams{
-		SMDP:             query.Get("smdp"),
-		MatchingID:       query.Get("matching_id"),
-		ConfirmationCode: query.Get("confirmation_code"),
-		AIDHex:           query.Get("aid_hex"),
-		IMEI:             query.Get("imei"),
+		SMDP:             request.SMDP,
+		MatchingID:       request.MatchingID,
+		ConfirmationCode: request.ConfirmationCode,
+		AIDHex:           request.AIDHex,
+		IMEI:             request.IMEI,
 	}
 	if strings.TrimSpace(params.SMDP) == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "smdp 为必填项")

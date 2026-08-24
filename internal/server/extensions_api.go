@@ -50,7 +50,7 @@ func (s *Server) routeExtensionAPI(w http.ResponseWriter, r *http.Request, clean
 			writeError(w, http.StatusBadRequest, "plugin_install_failed", err.Error())
 			return true
 		}
-		s.recordAudit(r.Context(), "admin", "plugin.install_url", "plugin", plugin.ID, "success", request.URL)
+		s.audit(r, "plugin.install_url", "plugin", plugin.ID, "success")
 		writeJSON(w, http.StatusCreated, map[string]any{"data": plugin})
 		return true
 	}
@@ -78,7 +78,7 @@ func (s *Server) routeExtensionAPI(w http.ResponseWriter, r *http.Request, clean
 			writeError(w, http.StatusBadRequest, "plugin_install_failed", err.Error())
 			return true
 		}
-		s.recordAudit(r.Context(), "admin", "plugin.upload", "plugin", plugin.ID, "success", "upload")
+		s.audit(r, "plugin.upload", "plugin", plugin.ID, "success")
 		writeJSON(w, http.StatusCreated, map[string]any{"data": plugin})
 		return true
 	}

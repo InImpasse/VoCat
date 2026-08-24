@@ -1024,7 +1024,7 @@ func TestNotificationRedactionKeepsEmptySensitiveValuesEmpty(t *testing.T) {
 func TestEventsPoliciesAndTraffic(t *testing.T) {
 	ctx := context.Background()
 	database := openTestStore(t, ":memory:")
-	old := time.Unix(1_700_000_000, 0).UTC()
+	old := time.Now().UTC().Add(-time.Hour)
 	recent := old.Add(time.Hour)
 	if _, err := database.AppendAuditEvent(ctx, AuditEvent{
 		Actor: "admin", Action: "device.update", EntityType: "device",

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -21,10 +22,17 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrUnauthorized       = errors.New("unauthorized")
 	ErrInvalidCSRF        = errors.New("invalid csrf token")
-	ErrEmptyPassword      = errors.New("password cannot be empty")
+	ErrPasswordPolicy     = errors.New("password must contain at least 15 Unicode characters and at most 128 UTF-8 bytes")
+	// ErrEmptyPassword is retained as an alias for callers compiled against the
+	// previous API. Empty passwords now follow the same policy as all lengths.
+	ErrEmptyPassword = ErrPasswordPolicy
 )
 
-const bcryptPasswordLimit = 72
+const (
+	MinPasswordCharacters = 15
+	MaxPasswordBytes      = 128
+	bcryptPasswordLimit   = 72
+)
 
 var longPasswordHashPrefix = []byte("$vocat-sha256$")
 
@@ -88,6 +96,9 @@ func New(database *store.Store, options Options) (*Service, error) {
 // revoked only when the configured username or password changes.
 func (s *Service) EnsureAdmin(ctx context.Context, username string, password string) error {
 	username = strings.TrimSpace(username)
+	if err := ValidatePassword(password); err != nil {
+		return err
+	}
 	current, err := s.store.CurrentAdmin(ctx)
 	if err == nil &&
 		current.Username == username &&
@@ -113,6 +124,9 @@ func (s *Service) EnsureAdmin(ctx context.Context, username string, password str
 // process configuration must never overwrite a password changed through the UI
 // or CLI on a later restart.
 func (s *Service) EnsureAdminIfMissing(ctx context.Context, username string, password string) (bool, error) {
+	if err := ValidatePassword(password); err != nil {
+		return false, err
+	}
 	if _, err := s.store.CurrentAdmin(ctx); err == nil {
 		return false, nil
 	} else if !errors.Is(err, store.ErrNotFound) {
@@ -133,8 +147,8 @@ func (s *Service) ResetAdminCredentials(ctx context.Context, username string, pa
 	if len(username) < 1 || len(username) > 64 || strings.ContainsAny(username, "\r\n\t") {
 		return errors.New("administrator username must contain between 1 and 64 characters without control whitespace")
 	}
-	if password == "" {
-		return ErrEmptyPassword
+	if err := ValidatePassword(password); err != nil {
+		return err
 	}
 	if err := s.EnsureAdmin(ctx, username, password); err != nil {
 		return fmt.Errorf("auth: reset administrator credentials: %w", err)
@@ -290,8 +304,8 @@ func (s *Service) ChangePassword(
 	currentPassword string,
 	newPassword string,
 ) error {
-	if newPassword == "" {
-		return ErrEmptyPassword
+	if err := ValidatePassword(newPassword); err != nil {
+		return err
 	}
 	admin, err := s.store.AdminByUsername(ctx, strings.TrimSpace(username))
 	if errors.Is(err, store.ErrNotFound) {
@@ -313,6 +327,18 @@ func (s *Service) ChangePassword(
 	}
 	if err := s.store.SetAdmin(ctx, admin.Username, passwordHash); err != nil {
 		return fmt.Errorf("auth: save new password: %w", err)
+	}
+	return nil
+}
+
+// ValidatePassword applies the credential policy shared by bootstrap,
+// recovery, and authenticated password changes. Passwords are not trimmed.
+func ValidatePassword(password string) error {
+	if !utf8.ValidString(password) {
+		return ErrPasswordPolicy
+	}
+	if utf8.RuneCountInString(password) < MinPasswordCharacters || len(password) > MaxPasswordBytes {
+		return ErrPasswordPolicy
 	}
 	return nil
 }

@@ -1,19 +1,15 @@
-// Package update implements the `vocat update` self-updater. It queries the
-// GitHub Releases API for a newer build, downloads the matching Linux binary
-// for the current architecture, verifies it against a published SHA256SUMS,
-// atomically replaces the running binary on disk, and restarts the vocat
-// systemd unit.
+// Package update contains the legacy verified updater primitives. Hardened
+// command and Web entry points never invoke them; deployments consume reviewed
+// artifacts through the external release and rollback workflow instead.
 //
-// Trust model: GitHub TLS guarantees the channel; the repository owner controls
-// which assets are published; SHA256SUMS guards integrity. There is no GPG
-// signature verification — an accepted trade-off for a closed-network testing
-// tool. Both the CLI and authenticated web UI use this same verified replacement
-// path.
+// Callers outside those entry points must provide an explicit repository. No
+// upstream repository is trusted implicitly when VOCAT_REPO is empty.
 package update
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -40,6 +36,8 @@ type Options struct {
 	Help   bool   // print usage, do nothing
 }
 
+var errRepositoryRequired = errors.New("update: repository is required; no default repository is trusted")
+
 // Run executes the update subcommand. It returns nil on success or when an
 // update is reported-but-not-applied under --check; it returns an error only
 // when something concrete went wrong.
@@ -56,7 +54,7 @@ func Run(logger *slog.Logger, args []string) error {
 		opts.Repo = strings.TrimSpace(os.Getenv("VOCAT_REPO"))
 	}
 	if opts.Repo == "" {
-		opts.Repo = DefaultRepository
+		return errRepositoryRequired
 	}
 	if opts.Token == "" {
 		opts.Token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
@@ -95,7 +93,7 @@ func Run(logger *slog.Logger, args []string) error {
 // response.
 func ApplyLatest(ctx context.Context, logger *slog.Logger, opts Options, restart bool) (CheckResult, error) {
 	if strings.TrimSpace(opts.Repo) == "" {
-		opts.Repo = DefaultRepository
+		return CheckResult{}, errRepositoryRequired
 	}
 	if strings.TrimSpace(opts.Token) == "" {
 		opts.Token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
@@ -429,7 +427,7 @@ Fetch the latest release from GitHub and replace this binary in place.
 Flags:
   --check            Report whether an update is available, then exit.
   --force            Reinstall even when already at the latest version.
-  --repo owner/name  GitHub repository (default: $VOCAT_REPO or MengMengCode/VoCat).
+  --repo owner/name  Explicit GitHub repository (required if VOCAT_REPO is empty).
   --target path      Binary to replace (default: /opt/vocat/bin/vocat if
                      present, otherwise the running executable).
   --token token      GitHub bearer token (default: $GITHUB_TOKEN).

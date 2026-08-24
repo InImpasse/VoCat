@@ -355,13 +355,7 @@ export function DeviceEsimTab({ deviceId, deviceImei, isActive, deviceOnline, re
     try {
       await readEventStream(
         `/devices/${deviceId}/esim/actions/download`,
-        {
-          smdp,
-          matching_id: matchingId || undefined,
-          confirmation_code: confirmationCode || undefined,
-          aid_hex: aid || undefined,
-          imei: imei || undefined,
-        },
+        {},
         {
           signal: controller.signal,
           onData: (line) => {
@@ -391,6 +385,16 @@ export function DeviceEsimTab({ deviceId, deviceImei, isActive, deviceOnline, re
             } catch {
               /* ignore */
             }
+          },
+        },
+        {
+          method: "POST",
+          body: {
+            smdp,
+            matchingId: matchingId || undefined,
+            confirmationCode: confirmationCode || undefined,
+            aidHex: aid || undefined,
+            imei: imei || undefined,
           },
         },
       );

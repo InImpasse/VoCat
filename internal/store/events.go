@@ -7,14 +7,39 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
-// MaxLogEvents is the hard storage ceiling. Every new row beyond this limit
-// replaces the oldest row regardless of the optional, stricter retention rule.
-const MaxLogEvents = 10000
+const (
+	// MaxAuditEvents and AuditRetention are hard limits. Both are enforced on
+	// every append so a disabled maintenance loop cannot grow the security trail
+	// without bound or retain source addresses indefinitely.
+	MaxAuditEvents = 50000
+	AuditRetention = 90 * 24 * time.Hour
 
-func (s *Store) AppendAuditEvent(ctx context.Context, value AuditEvent) (AuditEvent, error) {
-	value.Action = strings.TrimSpace(value.Action)
+	MaxAuditActorBytes      = 256
+	MaxAuditActionBytes     = 128
+	MaxAuditEntityTypeBytes = 64
+	MaxAuditEntityIDBytes   = 256
+	MaxAuditOutcomeBytes    = 64
+	MaxAuditRemoteAddrBytes = 128
+	MaxAuditDetailsBytes    = 16 * 1024
+
+	// MaxLogEvents is the hard storage ceiling. Every new row beyond this limit
+	// replaces the oldest row regardless of the optional, stricter retention rule.
+	MaxLogEvents = 10000
+)
+
+// NormalizeAuditEvent bounds attacker-controlled audit fields before they are
+// logged or persisted. Limits are byte based so the database size remains
+// predictable while truncation still preserves valid UTF-8.
+func NormalizeAuditEvent(value AuditEvent) (AuditEvent, error) {
+	value.Actor = boundedAuditText(value.Actor, MaxAuditActorBytes)
+	value.Action = boundedAuditText(value.Action, MaxAuditActionBytes)
+	value.EntityType = boundedAuditText(value.EntityType, MaxAuditEntityTypeBytes)
+	value.EntityID = boundedAuditText(value.EntityID, MaxAuditEntityIDBytes)
+	value.Outcome = boundedAuditText(value.Outcome, MaxAuditOutcomeBytes)
+	value.RemoteAddr = boundedAuditText(value.RemoteAddr, MaxAuditRemoteAddrBytes)
 	if value.Action == "" {
 		return AuditEvent{}, errors.New("audit action is required")
 	}
@@ -22,17 +47,46 @@ func (s *Store) AppendAuditEvent(ctx context.Context, value AuditEvent) (AuditEv
 	if err != nil {
 		return AuditEvent{}, fmt.Errorf("normalize audit details: %w", err)
 	}
+	if len(details) > MaxAuditDetailsBytes {
+		return AuditEvent{}, fmt.Errorf("audit details exceed %d bytes", MaxAuditDetailsBytes)
+	}
+	value.Details = details
 	if value.CreatedAt.IsZero() {
 		value.CreatedAt = time.Now().UTC()
 	}
-	result, err := s.db.ExecContext(ctx, `
+	return value, nil
+}
+
+func boundedAuditText(value string, maxBytes int) string {
+	value = strings.TrimSpace(strings.ToValidUTF8(value, ""))
+	if len(value) <= maxBytes {
+		return value
+	}
+	value = value[:maxBytes]
+	for !utf8.ValidString(value) {
+		value = value[:len(value)-1]
+	}
+	return strings.TrimSpace(value)
+}
+
+func (s *Store) AppendAuditEvent(ctx context.Context, value AuditEvent) (AuditEvent, error) {
+	value, err := NormalizeAuditEvent(value)
+	if err != nil {
+		return AuditEvent{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AuditEvent{}, fmt.Errorf("begin audit append: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO audit_events (
 			actor, action, entity_type, entity_id, outcome, remote_addr,
 			details_json, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		value.Actor, value.Action, value.EntityType, value.EntityID,
-		value.Outcome, value.RemoteAddr, string(details), value.CreatedAt.Unix(),
+		value.Outcome, value.RemoteAddr, string(value.Details), value.CreatedAt.Unix(),
 	)
 	if err != nil {
 		return AuditEvent{}, fmt.Errorf("append audit event: %w", err)
@@ -41,7 +95,22 @@ func (s *Store) AppendAuditEvent(ctx context.Context, value AuditEvent) (AuditEv
 	if err != nil {
 		return AuditEvent{}, fmt.Errorf("read audit event id: %w", err)
 	}
-	value.Details = details
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM audit_events WHERE created_at < ?
+	`, time.Now().UTC().Add(-AuditRetention).Unix()); err != nil {
+		return AuditEvent{}, fmt.Errorf("enforce audit retention: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM audit_events WHERE id NOT IN (
+			SELECT id FROM audit_events
+			ORDER BY created_at DESC, id DESC LIMIT ?
+		)
+	`, MaxAuditEvents); err != nil {
+		return AuditEvent{}, fmt.Errorf("enforce audit event limit: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return AuditEvent{}, fmt.Errorf("commit audit append: %w", err)
+	}
 	return value, nil
 }
 

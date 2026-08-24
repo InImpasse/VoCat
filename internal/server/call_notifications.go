@@ -134,20 +134,20 @@ func (s *Server) NotifyIncomingCall(ctx context.Context, notification IncomingCa
 		}
 		if err != nil {
 			if s.logger != nil {
-				s.logger.Warn("read incoming call notification setting", "channel", channel, "error", err)
+				s.logger.Warn("read incoming call notification setting", "channel", channel, "error", notificationErrorText(err))
 			}
 			continue
 		}
 		var config map[string]any
 		if err := json.Unmarshal(setting.Config, &config); err != nil {
 			if s.logger != nil {
-				s.logger.Warn("decode incoming call notification setting", "channel", channel, "error", err)
+				s.logger.Warn("decode incoming call notification setting", "channel", channel, "error", notificationErrorText(err, setting))
 			}
 			continue
 		}
 		if err := sendCallNotification(destCtx, channel, config, notification); err != nil {
 			if s.logger != nil {
-				s.logger.Warn("send incoming call notification", "category", "call", "channel", channel, "device_id", notification.DeviceID, "caller", notification.Caller, "raw_error", err)
+				s.logger.Warn("send incoming call notification", "category", "call", "channel", channel, "device_id", notification.DeviceID, "caller", notification.Caller, "error", notificationErrorText(err, setting))
 			}
 		}
 	}

@@ -2,11 +2,26 @@ package update
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 )
+
+func TestRunRequiresExplicitRepository(t *testing.T) {
+	t.Setenv("VOCAT_REPO", "")
+	if err := Run(slog.Default(), nil); !errors.Is(err, errRepositoryRequired) {
+		t.Fatalf("Run() error = %v, want %v", err, errRepositoryRequired)
+	}
+}
+
+func TestApplyLatestRequiresExplicitRepository(t *testing.T) {
+	if _, err := ApplyLatest(context.Background(), slog.Default(), Options{}, false); !errors.Is(err, errRepositoryRequired) {
+		t.Fatalf("ApplyLatest() error = %v, want %v", err, errRepositoryRequired)
+	}
+}
 
 func TestValidateExecutableRejectsNonExecutableFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "not-vocat")

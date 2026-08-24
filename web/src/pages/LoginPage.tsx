@@ -5,6 +5,7 @@ import { useAuth } from "../store/auth";
 import { useI18n } from "../lib/i18n";
 import { message } from "../components/ui/message";
 import { BrandLogo } from "../components/shell/BrandLogo";
+import { safeRedirectTarget } from "../lib/safeRedirect";
 
 const INPUT_CLASS =
   "w-full rounded-lg border border-gray-200 bg-white/70 py-3 pl-10 pr-4 font-mono text-sm text-gray-900 placeholder-gray-400 outline-none transition-all focus:border-indigo-500/40 focus:ring-2 focus:ring-indigo-500/25 dark:border-white/10 dark:bg-black/20 dark:text-gray-100 dark:placeholder-gray-500";
@@ -31,7 +32,7 @@ export default function LoginPage() {
     if (ok) {
       message.success(t("欢迎回来"));
       const redirect = searchParams.get("redirect");
-      navigate(redirect ? decodeURIComponent(redirect) : "/", { replace: true });
+      navigate(safeRedirectTarget(redirect, window.location.origin), { replace: true });
     } else {
       message.error(t("登录失败，请检查凭证"));
     }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -16,25 +15,28 @@ const accessSettingKey = "security.access"
 
 // accessConfig is the persisted network access policy.
 type accessConfig struct {
-	Mode              string   `json:"mode"`               // "internal" (default) or "public"
-	AllowedCIDRs      []string `json:"allowed_cidrs"`      // extra CIDRs always allowed
-	TrustProxyHeaders bool     `json:"trust_proxy_headers"` // honor X-Forwarded-For
+	Mode              string   `json:"mode"`                // "internal" (default) or "public"
+	AllowedCIDRs      []string `json:"allowed_cidrs"`       // extra CIDRs always allowed
+	TrustProxyHeaders bool     `json:"trust_proxy_headers"` // honor headers only from trusted proxies
+	TrustedProxyCIDRs []string `json:"trusted_proxy_cidrs"` // reverse proxies allowed to supply client IPs
 }
 
 // parsedAccessConfig is the validated runtime form of accessConfig.
 type parsedAccessConfig struct {
-	mode       string
-	cidrs      []netip.Prefix
-	trustProxy bool
+	mode              string
+	cidrs             []netip.Prefix
+	trustProxy        bool
+	trustedProxyCIDRs []netip.Prefix
 }
 
 // internalNetworks are always allowed when mode is "internal": loopback,
-// RFC1918 private ranges, link-local, and IPv6 ULA.
+// RFC1918 private ranges, Tailscale IPv4, link-local, and IPv6 ULA.
 var internalNetworks = []netip.Prefix{
 	netip.MustParsePrefix("127.0.0.0/8"),
 	netip.MustParsePrefix("10.0.0.0/8"),
 	netip.MustParsePrefix("172.16.0.0/12"),
 	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("100.64.0.0/10"),
 	netip.MustParsePrefix("169.254.0.0/16"),
 	netip.MustParsePrefix("::1/128"),
 	netip.MustParsePrefix("fe80::/10"),
@@ -58,26 +60,47 @@ func parseAccessConfig(config accessConfig) (parsedAccessConfig, error) {
 		mode:       mode,
 		trustProxy: config.TrustProxyHeaders,
 	}
-	for _, raw := range config.AllowedCIDRs {
+	var err error
+	parsed.cidrs, err = parseAccessPrefixes(config.AllowedCIDRs)
+	if err != nil {
+		return parsedAccessConfig{}, err
+	}
+	parsed.trustedProxyCIDRs, err = parseAccessPrefixes(config.TrustedProxyCIDRs)
+	if err != nil {
+		return parsedAccessConfig{}, errors.New("invalid trusted proxy " + err.Error())
+	}
+	return parsed, nil
+}
+
+func parseAccessPrefixes(values []string) ([]netip.Prefix, error) {
+	prefixes := make([]netip.Prefix, 0, len(values))
+	for _, raw := range values {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
 		}
 		if prefix, err := netip.ParsePrefix(raw); err == nil {
-			parsed.cidrs = append(parsed.cidrs, prefix.Masked())
+			address := prefix.Addr()
+			bits := prefix.Bits()
+			if address.Is4In6() && bits >= 96 {
+				address = address.Unmap()
+				bits -= 96
+			}
+			prefixes = append(prefixes, netip.PrefixFrom(address.WithZone(""), bits).Masked())
 			continue
 		}
 		if address, err := netip.ParseAddr(raw); err == nil {
+			address = address.Unmap().WithZone("")
 			bits := 32
 			if address.Is6() {
 				bits = 128
 			}
-			parsed.cidrs = append(parsed.cidrs, netip.PrefixFrom(address, bits))
+			prefixes = append(prefixes, netip.PrefixFrom(address, bits))
 			continue
 		}
-		return parsedAccessConfig{}, errors.New("invalid CIDR or IP: " + raw)
+		return nil, errors.New("invalid CIDR or IP: " + raw)
 	}
-	return parsed, nil
+	return prefixes, nil
 }
 
 // allowed reports whether a client address may reach the service.
@@ -109,33 +132,72 @@ func (config parsedAccessConfig) allowed(address netip.Addr) bool {
 	return false
 }
 
-// clientIP determines the request's source address, honoring X-Forwarded-For
-// only when the deployment is configured to trust proxy headers.
+// clientIP determines the request's source address. Forwarded headers are used
+// only when the direct TCP peer belongs to an explicitly trusted proxy range.
 func (config parsedAccessConfig) clientIP(r *http.Request) netip.Addr {
-	if config.trustProxy {
-		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-			first := strings.TrimSpace(strings.Split(forwarded, ",")[0])
-			if address, err := netip.ParseAddr(first); err == nil {
-				return address.Unmap()
+	peer := directPeerIP(r.RemoteAddr)
+	if !peer.IsValid() || !config.trustProxy || len(config.trustedProxyCIDRs) == 0 || !config.isTrustedProxy(peer) {
+		return peer
+	}
+
+	forwardedValues := r.Header.Values("X-Forwarded-For")
+	if len(forwardedValues) > 0 {
+		forwarded := strings.TrimSpace(strings.Join(forwardedValues, ","))
+		chain, ok := parseForwardedChain(forwarded)
+		if !ok {
+			return netip.Addr{}
+		}
+		chain = append(chain, peer)
+		for index := len(chain) - 1; index >= 0; index-- {
+			if !config.isTrustedProxy(chain[index]) {
+				return chain[index]
 			}
 		}
-		if real := strings.TrimSpace(r.Header.Get("X-Real-IP")); real != "" {
-			if address, err := netip.ParseAddr(real); err == nil {
-				return address.Unmap()
-			}
+		return chain[0]
+	}
+	realValues := r.Header.Values("X-Real-IP")
+	if len(realValues) > 0 {
+		if len(realValues) != 1 {
+			return netip.Addr{}
 		}
+		real := strings.TrimSpace(realValues[0])
+		address, err := netip.ParseAddr(real)
+		if err != nil {
+			return netip.Addr{}
+		}
+		return address.Unmap().WithZone("")
 	}
-	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
-	if err != nil {
-		host = strings.TrimSpace(r.RemoteAddr)
-	}
-	address, err := netip.ParseAddr(host)
+	return peer
+}
+
+func directPeerIP(remoteAddr string) netip.Addr {
+	addressPort, err := netip.ParseAddrPort(strings.TrimSpace(remoteAddr))
 	if err != nil {
 		return netip.Addr{}
 	}
-	// Report the canonical (unmapped) form so logs, the login rate-limit key,
-	// and the access decision all agree on one representation of an IPv4 client.
-	return address.Unmap()
+	return addressPort.Addr().Unmap().WithZone("")
+}
+
+func parseForwardedChain(forwarded string) ([]netip.Addr, bool) {
+	parts := strings.Split(forwarded, ",")
+	chain := make([]netip.Addr, 0, len(parts))
+	for _, part := range parts {
+		address, err := netip.ParseAddr(strings.TrimSpace(part))
+		if err != nil {
+			return nil, false
+		}
+		chain = append(chain, address.Unmap().WithZone(""))
+	}
+	return chain, len(chain) > 0
+}
+
+func (config parsedAccessConfig) isTrustedProxy(address netip.Addr) bool {
+	for _, prefix := range config.trustedProxyCIDRs {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
 }
 
 // accessControl rejects requests whose source IP is outside the configured
@@ -172,6 +234,34 @@ func (s *Server) currentAccessConfig() parsedAccessConfig {
 	return s.access
 }
 
+func (config parsedAccessConfig) persisted() accessConfig {
+	return accessConfig{
+		Mode:              config.mode,
+		AllowedCIDRs:      prefixStrings(config.cidrs),
+		TrustProxyHeaders: config.trustProxy,
+		TrustedProxyCIDRs: prefixStrings(config.trustedProxyCIDRs),
+	}
+}
+
+func (config parsedAccessConfig) response(address netip.Addr) map[string]any {
+	return map[string]any{
+		"mode":                config.mode,
+		"allowed_cidrs":       prefixStrings(config.cidrs),
+		"trust_proxy_headers": config.trustProxy,
+		"trusted_proxy_cidrs": prefixStrings(config.trustedProxyCIDRs),
+		"client_ip":           address.String(),
+		"client_allowed":      config.allowed(address),
+	}
+}
+
+func prefixStrings(prefixes []netip.Prefix) []string {
+	values := make([]string, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		values = append(values, prefix.String())
+	}
+	return values
+}
+
 // loadAccessConfig reads the persisted policy (defaulting to internal) into the
 // runtime cache. Called at startup.
 func (s *Server) loadAccessConfig(ctx context.Context) {
@@ -201,18 +291,8 @@ func (s *Server) handleSecuritySettings(w http.ResponseWriter, r *http.Request) 
 	case http.MethodGet:
 		config := s.currentAccessConfig()
 		address := config.clientIP(r)
-		cidrs := make([]string, 0, len(config.cidrs))
-		for _, prefix := range config.cidrs {
-			cidrs = append(cidrs, prefix.String())
-		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]any{
-				"mode":                config.mode,
-				"allowed_cidrs":       cidrs,
-				"trust_proxy_headers": config.trustProxy,
-				"client_ip":           address.String(),
-				"client_allowed":      config.allowed(address),
-			},
+			"data": config.response(address),
 		})
 	case http.MethodPut:
 		var request accessConfig
@@ -225,7 +305,7 @@ func (s *Server) handleSecuritySettings(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "invalid_access_policy", err.Error())
 			return
 		}
-		payload, err := json.Marshal(request)
+		payload, err := json.Marshal(parsed.persisted())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "an internal error occurred")
 			return
@@ -242,18 +322,8 @@ func (s *Server) handleSecuritySettings(w http.ResponseWriter, r *http.Request) 
 		s.accessMu.Unlock()
 		s.audit(r, "settings.security.update", "settings", "security", "success")
 		address := parsed.clientIP(r)
-		cidrs := make([]string, 0, len(parsed.cidrs))
-		for _, prefix := range parsed.cidrs {
-			cidrs = append(cidrs, prefix.String())
-		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]any{
-				"mode":                parsed.mode,
-				"allowed_cidrs":       cidrs,
-				"trust_proxy_headers": parsed.trustProxy,
-				"client_ip":           address.String(),
-				"client_allowed":      parsed.allowed(address),
-			},
+			"data": parsed.response(address),
 		})
 	default:
 		w.Header().Set("Allow", "GET, PUT")

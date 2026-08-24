@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import {
-  AlertRegular,
   CheckmarkRegular,
   InfoRegular,
   KeyRegular,
@@ -14,13 +13,6 @@ export interface PasswordForm {
   oldPassword: string;
   newPassword: string;
   confirmPassword: string;
-}
-
-export interface UpdateInfo {
-  hasUpdate?: boolean;
-  latestVersion?: string;
-  releaseNote?: string;
-  isDocker?: boolean;
 }
 
 function CardDecor() {
@@ -118,18 +110,8 @@ export function SecurityCard({
 
 export function SystemInfoCard({
   info,
-  updateInfo,
-  checkingUpdate,
-  applyingUpdate,
-  onCheckUpdate,
-  onApplyUpdate,
 }: {
   info: SystemInfo;
-  updateInfo: UpdateInfo | null;
-  checkingUpdate: boolean;
-  applyingUpdate: boolean;
-  onCheckUpdate: () => void;
-  onApplyUpdate: () => void;
 }) {
   const { t } = useI18n();
   return (
@@ -143,28 +125,8 @@ export function SystemInfoCard({
       </div>
       <div className="relative z-10 space-y-4 text-sm">
         <div className="rounded-lg bg-gray-50 p-3 dark:bg-white/5">
-          <FieldRow label={t("版本")} value={info.version} monospace>
-            <div className="flex items-center justify-end gap-3">
-              <Button size="small" variant="primary" className="!border-0" loading={checkingUpdate} onClick={onCheckUpdate}>
-                {t("检查更新")}
-              </Button>
-              <span>{info.version || "Unknown"}</span>
-            </div>
-          </FieldRow>
+          <FieldRow label={t("版本")} value={info.version || "Unknown"} monospace />
         </div>
-        {updateInfo?.hasUpdate ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/20 dark:bg-amber-500/10">
-            <div className="mb-2 flex items-center gap-2 text-[13px] font-bold text-amber-800 dark:text-amber-200">
-              <AlertRegular /> {t("发现新版本:")} {updateInfo.latestVersion}
-            </div>
-            <div className="mb-4 max-h-32 overflow-y-auto whitespace-pre-wrap pr-2 text-xs text-amber-700 dark:text-amber-300/80">
-              {updateInfo.releaseNote || t("暂无更新说明")}
-            </div>
-            <Button variant="warning" loading={applyingUpdate} onClick={onApplyUpdate} className="w-full !border-0">
-              {t("立即更新并重启")}
-            </Button>
-          </div>
-        ) : null}
         <div className="rounded-lg bg-gray-50 p-3 dark:bg-white/5">
           <FieldRow label={t("构建时间")} value={info.buildTime} monospace />
         </div>

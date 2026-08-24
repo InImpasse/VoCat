@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { AlertRegular, CheckmarkRegular } from "@fluentui/react-icons";
 import { api, apiMessage, getSecuritySettings, updateSecuritySettings } from "../api";
 import type { DeveloperSettings, HTTPSSettings, NotificationSettings, SecuritySettings, SystemInfo } from "../types";
-import { Button, PageHeader, confirmDialog, message } from "../components/ui";
+import { Button, PageHeader, message } from "../components/ui";
 import { CardDecor, CardIcon, CardTitle, SecurityCard, SystemInfoCard } from "../components/settings/Cards";
-import type { PasswordForm, UpdateInfo } from "../components/settings/Cards";
+import type { PasswordForm } from "../components/settings/Cards";
 import { NetworkAccessCard } from "../components/settings/NetworkAccessCard";
 import type { NetworkAccessForm } from "../components/settings/NetworkAccessCard";
 import { SegmentedTabs } from "../components/settings/controls";
@@ -42,7 +42,12 @@ const NOTIFY_TABS = [
 
 const EMPTY_SYSTEM_INFO: SystemInfo = { version: "", buildTime: "", config: "" };
 
-const EMPTY_SECURITY: NetworkAccessForm = { mode: "internal", allowedCidrs: [], trustProxyHeaders: false };
+const EMPTY_SECURITY: NetworkAccessForm = {
+  mode: "internal",
+  allowedCidrs: [],
+  trustProxyHeaders: false,
+  trustedProxyCidrs: [],
+};
 export default function SettingsPage() {
   const { refresh } = useAuth();
   const { t, lang } = useI18n();
@@ -58,9 +63,6 @@ export default function SettingsPage() {
   const [testingWecom, setTestingWecom] = useState(false);
   const [testingLark, setTestingLark] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [applyingUpdate, setApplyingUpdate] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [security, setSecurity] = useState<NetworkAccessForm>(EMPTY_SECURITY);
   const [clientIp, setClientIp] = useState("");
   const [clientAllowed, setClientAllowed] = useState(true);
@@ -106,6 +108,7 @@ export default function SettingsPage() {
       mode: data.mode === "public" ? "public" : "internal",
       allowedCidrs: data.allowedCidrs ?? [],
       trustProxyHeaders: !!data.trustProxyHeaders,
+      trustedProxyCidrs: data.trustedProxyCidrs ?? [],
     });
     setClientIp(data.clientIp ?? "");
     setClientAllowed(!!data.clientAllowed);
@@ -224,6 +227,7 @@ export default function SettingsPage() {
         mode: security.mode,
         allowedCidrs: security.allowedCidrs.map((cidr) => cidr.trim()).filter(Boolean),
         trustProxyHeaders: security.trustProxyHeaders,
+        trustedProxyCidrs: security.trustedProxyCidrs.map((cidr) => cidr.trim()).filter(Boolean),
       });
       applySecurity(data);
       if (data.clientAllowed) {
@@ -357,70 +361,6 @@ export default function SettingsPage() {
     }
   }, [forms.lark]);
 
-  const onCheckUpdate = useCallback(async () => {
-    setCheckingUpdate(true);
-    try {
-      // vocat 后端返回 {available, version, message}（参考实现是 has_update 等）
-      const data = await api<{ available?: boolean; version?: string; message?: string; is_docker?: boolean }>("/system/update/check");
-      const info: UpdateInfo = {
-        hasUpdate: !!data?.available,
-        latestVersion: data?.version,
-        releaseNote: data?.message,
-        isDocker: !!data?.is_docker,
-      };
-      setUpdateInfo(info);
-      if (!info.hasUpdate) message.info(data?.message || t("当前已是最新版本"));
-    } catch (error) {
-      message.error(apiMessage(error) || t("检查更新失败"));
-    } finally {
-      setCheckingUpdate(false);
-    }
-  }, []);
-
-  const onApplyUpdate = useCallback(async () => {
-    if (!updateInfo) return;
-    if (updateInfo.isDocker) {
-      await confirmDialog(
-        lang === "zh"
-          ? "检测到当前系统运行在 Docker 环境下。不建议在容器内直接执行文件热替换，请拉取最新镜像（如 docker pull vocat:latest）并重启容器来完成升级！"
-          : "The system is running inside Docker. In-place binary replacement is not recommended; pull the latest image (e.g. docker pull vocat:latest) and restart the container to upgrade!",
-        t("环境警告"),
-        { confirmText: t("知道了"), type: "warning" },
-      );
-      return;
-    }
-    const confirmed = await confirmDialog(
-      <div>
-        <div>
-            {lang === "zh"
-              ? `最新版本：${updateInfo.latestVersion}，确定要现在更新并重启服务吗？`
-              : `Latest version: ${updateInfo.latestVersion}. Update and restart the service now?`}
-          </div>
-        {updateInfo.releaseNote ? (
-          <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-md bg-black/5 p-2 text-xs dark:bg-white/10">
-            {updateInfo.releaseNote}
-          </pre>
-        ) : null}
-      </div>,
-      t("应用更新"),
-      { confirmText: t("立即更新"), cancelText: t("取消"), type: "warning" },
-    );
-    if (!confirmed) return;
-    setApplyingUpdate(true);
-    try {
-      const data = await api<{ message?: string; reauthenticationRequired?: boolean }>("/system/update/apply", { method: "POST", body: {} });
-      message.success(data?.message || t("正在更新..."));
-      window.setTimeout(() => {
-        if (data?.reauthenticationRequired) window.location.replace("/login");
-        else window.location.reload();
-      }, 1500);
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : t("应用更新失败"));
-    } finally {
-      setApplyingUpdate(false);
-    }
-  }, [updateInfo]);
-
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader title={t("系统设置")} subtitle={t("管理网关参数与运行信息")} />
@@ -431,14 +371,7 @@ export default function SettingsPage() {
           loading={changingPassword}
           onSubmit={onChangePassword}
         />
-        <SystemInfoCard
-          info={systemInfo}
-          updateInfo={updateInfo}
-          checkingUpdate={checkingUpdate}
-          applyingUpdate={applyingUpdate}
-          onCheckUpdate={onCheckUpdate}
-          onApplyUpdate={onApplyUpdate}
-        />
+        <SystemInfoCard info={systemInfo} />
 
         <NetworkAccessCard
           value={security}

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -99,6 +102,38 @@ func newRegionTestStore(t *testing.T) *store.Store {
 
 func regionTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestHTTPSRedirectTargetIgnoresHostHeader(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "http://attacker.example/settings?tab=security", nil)
+	request.Host = "attacker.example"
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		http.LocalAddrContextKey,
+		&net.TCPAddr{IP: net.ParseIP("192.0.2.25"), Port: 7575},
+	))
+
+	got := httpsRedirectTarget(request, "0.0.0.0:7575")
+	want := "https://192.0.2.25:7575/settings?tab=security"
+	if got != want {
+		t.Fatalf("httpsRedirectTarget() = %q, want %q", got, want)
+	}
+}
+
+func TestHTTPSRedirectTargetUsesLoopbackForUnspecifiedFallback(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "http://attacker.example/", nil)
+	if got := httpsRedirectTarget(request, "0.0.0.0:7575"); got != "https://127.0.0.1:7575/" {
+		t.Fatalf("httpsRedirectTarget() = %q", got)
+	}
+}
+
+func TestDeveloperModeIsPermanentlyDisabled(t *testing.T) {
+	if isDeveloperEnabled(context.Background(), nil) {
+		t.Fatal("hardened build enabled developer mode")
+	}
+	if err := runDevelop([]string{"on"}, regionTestLogger()); err == nil {
+		t.Fatal("develop on was accepted by hardened build")
+	}
 }
 
 func TestEnforceCardRegionForcesAirplaneAndPersistsPolicy(t *testing.T) {

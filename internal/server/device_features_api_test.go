@@ -12,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
+	"vocat/internal/auth"
 	"vocat/internal/developer"
 	"vocat/internal/device"
 	"vocat/internal/exportproxy"
@@ -196,9 +199,11 @@ func TestManualModemRebootInvalidatesConnectedDataRuntime(t *testing.T) {
 
 type esimAIDCaptureController struct {
 	fakeDeviceController
-	switchAID  string
-	disableAID string
-	renameAID  string
+	switchAID      string
+	disableAID     string
+	renameAID      string
+	downloadID     string
+	downloadParams device.EsimDownloadParams
 }
 
 func (controller *esimAIDCaptureController) ESIMSwitchProfile(_ context.Context, _, _, aidHex string) error {
@@ -214,6 +219,18 @@ func (controller *esimAIDCaptureController) ESIMDisableProfile(_ context.Context
 func (controller *esimAIDCaptureController) ESIMRenameProfile(_ context.Context, _, _, _, aidHex string) error {
 	controller.renameAID = aidHex
 	return nil
+}
+
+func (controller *esimAIDCaptureController) ESIMDownloadProfile(
+	_ context.Context,
+	deviceID string,
+	params device.EsimDownloadParams,
+	progress func(device.EsimProgress),
+) (*device.EsimDownloadResult, error) {
+	controller.downloadID = deviceID
+	controller.downloadParams = params
+	progress(device.EsimProgress{Step: "authenticate", Msg: "connected", Pct: 50})
+	return &device.EsimDownloadResult{SpaceDelta: 1024}, nil
 }
 
 func TestAttachSingleEUICCIdentityFillsProfileGroupMetadataKey(t *testing.T) {
@@ -577,16 +594,16 @@ func TestHandleESIMShapes(t *testing.T) {
 		t.Fatalf("notifications status = %d", notif.Code)
 	}
 
-	// Download is a GET+SSE endpoint, so POST is rejected.
-	downloadPost := httptest.NewRecorder()
-	server.handleESIM(downloadPost, httptest.NewRequest(http.MethodPost, "/esim/actions/download", nil), []string{"actions", "download"}, "dev1", false)
-	if downloadPost.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("download POST status = %d, want 405", downloadPost.Code)
+	// Download secrets must never be accepted through a URL query string.
+	downloadGet := httptest.NewRecorder()
+	server.handleESIM(downloadGet, httptest.NewRequest(http.MethodGet, "/esim/actions/download?smdp=rsp.example.com", nil), []string{"actions", "download"}, "dev1", false)
+	if downloadGet.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("download GET status = %d, want 405", downloadGet.Code)
 	}
 
-	// Download with no device manager reports 503.
+	// Download with no device manager reports 503 after selecting the POST route.
 	download := httptest.NewRecorder()
-	server.handleESIM(download, httptest.NewRequest(http.MethodGet, "/esim/actions/download?smdp=rsp.example.com", nil), []string{"actions", "download"}, "dev1", false)
+	server.handleESIM(download, httptest.NewRequest(http.MethodPost, "/esim/actions/download", strings.NewReader(`{"smdp":"rsp.example.com"}`)), []string{"actions", "download"}, "dev1", false)
 	if download.Code != http.StatusServiceUnavailable {
 		t.Fatalf("download (no device) status = %d, want 503", download.Code)
 	}
@@ -616,6 +633,26 @@ func TestHandleESIMShapes(t *testing.T) {
 	}
 	controller := &esimAIDCaptureController{}
 	present := &Server{store: database, logger: regionTestLogger(), maxRequestBodyBytes: 4096, devices: controller}
+	downloadBody := `{"smdp":"rsp.example.com","matching_id":"matching-secret","confirmation_code":"confirmation-secret","aid_hex":"A0000005591010FFFFFFFF8900000177","imei":"123456789012345"}`
+	downloadReq := httptest.NewRequest(http.MethodPost, "/esim/actions/download", strings.NewReader(downloadBody))
+	downloadReq.Header.Set("Content-Type", "application/json")
+	downloadOK := httptest.NewRecorder()
+	present.handleESIM(downloadOK, downloadReq, []string{"actions", "download"}, "dev1", true)
+	if downloadOK.Code != http.StatusOK || !strings.HasPrefix(downloadOK.Header().Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("download status = %d, content-type = %q, body = %s", downloadOK.Code, downloadOK.Header().Get("Content-Type"), downloadOK.Body.String())
+	}
+	if controller.downloadID != "dev1" || controller.downloadParams.SMDP != "rsp.example.com" ||
+		controller.downloadParams.MatchingID != "matching-secret" ||
+		controller.downloadParams.ConfirmationCode != "confirmation-secret" ||
+		controller.downloadParams.AIDHex != "A0000005591010FFFFFFFF8900000177" ||
+		controller.downloadParams.IMEI != "123456789012345" {
+		t.Fatalf("download parameters = %#v for %q", controller.downloadParams, controller.downloadID)
+	}
+	if !strings.Contains(downloadOK.Body.String(), `"step":"authenticate"`) ||
+		!strings.Contains(downloadOK.Body.String(), `"step":"done"`) {
+		t.Fatalf("download SSE body = %s", downloadOK.Body.String())
+	}
+
 	swOK := httptest.NewRecorder()
 	swReq := httptest.NewRequest(http.MethodPost, "/esim/actions/switch", strings.NewReader(`{"iccid":"8900000000000000001","aidHex":"A0000005591010FFFFFFFF8900000177"}`))
 	swReq.Header.Set("Content-Type", "application/json")
@@ -670,7 +707,9 @@ func TestHandleESIMShapes(t *testing.T) {
 
 	// Download on a present device but with no smdp address reports 400.
 	dlNoSmdp := httptest.NewRecorder()
-	present.handleESIM(dlNoSmdp, httptest.NewRequest(http.MethodGet, "/esim/actions/download", nil), []string{"actions", "download"}, "dev1", true)
+	dlNoSmdpReq := httptest.NewRequest(http.MethodPost, "/esim/actions/download", strings.NewReader(`{}`))
+	dlNoSmdpReq.Header.Set("Content-Type", "application/json")
+	present.handleESIM(dlNoSmdp, dlNoSmdpReq, []string{"actions", "download"}, "dev1", true)
 	if dlNoSmdp.Code != http.StatusBadRequest {
 		t.Fatalf("download (no smdp) status = %d, want 400", dlNoSmdp.Code)
 	}
@@ -756,20 +795,21 @@ func TestHandleUpdateApplyIsSafeNoop(t *testing.T) {
 	server := &Server{logger: regionTestLogger()}
 	recorder := httptest.NewRecorder()
 	server.handleUpdateApply(recorder, httptest.NewRequest(http.MethodPost, "/apply", nil))
-	if recorder.Code != http.StatusOK {
+	if recorder.Code != http.StatusConflict {
 		t.Fatalf("status = %d", recorder.Code)
 	}
-	if data := decodeData(t, recorder); data["applied"] != false {
-		t.Fatalf("update apply must be a no-op, got %v", data)
+	if !strings.Contains(recorder.Body.String(), `"code":"updates_disabled"`) {
+		t.Fatalf("update apply response = %s", recorder.Body.String())
 	}
 }
 
 func TestHandleUpdateCheckUsesTrustedRepository(t *testing.T) {
 	server := &Server{
+		updatesEnabled:   true,
 		logger:           regionTestLogger(),
-		updateRepository: update.DefaultRepository,
+		updateRepository: "InImpasse/VoCat",
 		updateCheck: func(_ context.Context, repo, token, current string) (update.CheckResult, error) {
-			if repo != update.DefaultRepository || token != "token" || current == "" {
+			if repo != "InImpasse/VoCat" || token != "token" || current == "" {
 				t.Fatalf("check arguments = %q, %q, %q", repo, token, current)
 			}
 			return update.CheckResult{
@@ -787,7 +827,7 @@ func TestHandleUpdateCheckUsesTrustedRepository(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body)
 	}
 	data := decodeData(t, recorder)
-	if data["available"] != true || data["version"] != "9.9.9" || data["repository"] != update.DefaultRepository {
+	if data["available"] != true || data["version"] != "9.9.9" || data["repository"] != "InImpasse/VoCat" {
 		t.Fatalf("check data = %#v", data)
 	}
 }
@@ -808,11 +848,15 @@ func TestHandleUpdateApplyInstallsFromTrustedRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := &Server{
+		updatesEnabled:   true,
 		store:            database,
 		logger:           regionTestLogger(),
-		updateRepository: update.DefaultRepository,
+		updateRepository: "InImpasse/VoCat",
+		runningInContainer: func() bool {
+			return false
+		},
 		updateApply: func(_ context.Context, _ *slog.Logger, options update.Options, restart bool) (update.CheckResult, error) {
-			if options.Repo != update.DefaultRepository || restart {
+			if options.Repo != "InImpasse/VoCat" || restart {
 				t.Fatalf("apply options = %#v, restart = %v", options, restart)
 			}
 			return update.CheckResult{Applied: true, Latest: "9.9.9"}, nil
@@ -847,8 +891,20 @@ func TestE911WebsheetFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
+	authService, err := auth.New(database, auth.Options{SessionTTL: time.Hour, BcryptCost: bcrypt.MinCost})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := authService.EnsureAdmin(context.Background(), "admin", "correct-password"); err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := authService.Login(context.Background(), "admin", "correct-password")
+	if err != nil {
+		t.Fatal(err)
+	}
 	server := &Server{
 		store:               database,
+		auth:                authService,
 		logger:              regionTestLogger(),
 		websheets:           newWebsheetManager(),
 		maxRequestBodyBytes: 4096,
@@ -862,47 +918,147 @@ func TestE911WebsheetFlow(t *testing.T) {
 	}
 	createData := decodeData(t, createRec)
 	embedURL, _ := createData["embed_url"].(string)
-	if embedURL == "" || !strings.HasPrefix(embedURL, "/websheets/") {
+	if embedURL == "" || !strings.HasPrefix(embedURL, "/websheets/") || strings.Contains(embedURL, "?") {
 		t.Fatalf("embed_url = %v", createData["embed_url"])
 	}
+	if _, exists := createData["token"]; exists {
+		t.Fatalf("websheet response exposed a token: %#v", createData)
+	}
 
-	// 2. The form is served for a valid token.
+	// 2. The form requires the normal authenticated session and contains no URL token.
+	unauthenticated := httptest.NewRecorder()
+	server.handleWebsheet(unauthenticated, httptest.NewRequest(http.MethodGet, embedURL, nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated form status = %d, want 401", unauthenticated.Code)
+	}
 	formRec := httptest.NewRecorder()
-	server.handleWebsheet(formRec, httptest.NewRequest(http.MethodGet, embedURL, nil))
+	formReq := httptest.NewRequest(http.MethodGet, embedURL, nil)
+	addWebsheetAuthCookies(formReq, credentials)
+	server.handleWebsheet(formRec, formReq)
 	if formRec.Code != http.StatusOK || !strings.Contains(formRec.Body.String(), "E911") {
 		t.Fatalf("form status = %d", formRec.Code)
 	}
+	if formRec.Header().Get("Cache-Control") != "no-store" ||
+		!strings.Contains(formRec.Body.String(), csrfHeaderName) {
+		t.Fatalf("websheet form cache/header protection is missing")
+	}
+	if strings.Contains(formRec.Body.String(), "?token=") || strings.Contains(formRec.Body.String(), credentials.SessionToken) {
+		t.Fatal("websheet form exposed an authentication credential in HTML or a URL")
+	}
 
-	// 3. The callback stores the address, and done completes the session.
-	callbackURL := strings.Replace(embedURL, "?", "/callback?", 1)
+	// 3. Both mutations require double-submit and session-bound CSRF validation.
+	callbackURL := embedURL + "/callback"
+	missingCSRFReq := httptest.NewRequest(http.MethodPost, callbackURL, strings.NewReader(`{"street":"1 Main St"}`))
+	missingCSRFReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: credentials.SessionToken})
+	missingCSRFRec := httptest.NewRecorder()
+	server.handleWebsheet(missingCSRFRec, missingCSRFReq)
+	if missingCSRFRec.Code != http.StatusForbidden {
+		t.Fatalf("callback without CSRF status = %d, want 403", missingCSRFRec.Code)
+	}
+	invalidCSRFReq := httptest.NewRequest(http.MethodPost, callbackURL, strings.NewReader(`{"street":"1 Main St"}`))
+	invalidCSRFReq.Header.Set(csrfHeaderName, "not-the-session-token")
+	invalidCSRFReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: credentials.SessionToken})
+	invalidCSRFReq.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "not-the-session-token"})
+	invalidCSRFRec := httptest.NewRecorder()
+	server.handleWebsheet(invalidCSRFRec, invalidCSRFReq)
+	if invalidCSRFRec.Code != http.StatusForbidden {
+		t.Fatalf("callback with unbound CSRF status = %d, want 403", invalidCSRFRec.Code)
+	}
+	for name, body := range map[string]string{
+		"missing required field": `{"street":"1 Main St"}`,
+		"unknown field":          `{"street":"1 Main St","city":"Springfield","country":"US","token":"unexpected"}`,
+		"oversized field":        `{"street":"` + strings.Repeat("x", maxE911FieldBytes+1) + `","city":"Springfield","country":"US"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, callbackURL, strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set(csrfHeaderName, credentials.CSRFToken)
+			addWebsheetAuthCookies(request, credentials)
+			response := httptest.NewRecorder()
+			server.handleWebsheet(response, request)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("invalid callback status = %d, body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
 	callbackReq := httptest.NewRequest(http.MethodPost, callbackURL, strings.NewReader(`{"street":"1 Main St","city":"Springfield","country":"US"}`))
 	callbackReq.Header.Set("Content-Type", "application/json")
+	callbackReq.Header.Set(csrfHeaderName, credentials.CSRFToken)
+	addWebsheetAuthCookies(callbackReq, credentials)
 	callbackRec := httptest.NewRecorder()
 	server.handleWebsheet(callbackRec, callbackReq)
 	if callbackRec.Code != http.StatusOK {
 		t.Fatalf("callback status = %d, body=%s", callbackRec.Code, callbackRec.Body.String())
 	}
 	stored, err := database.AppSetting(context.Background(), "e911_address:dev1")
-	if err != nil || !strings.Contains(string(stored.Value), "Springfield") {
+	if err != nil || !stored.Sensitive || !strings.Contains(string(stored.Value), "Springfield") {
 		t.Fatalf("e911 address not persisted: %v %v", stored, err)
 	}
+	identicalReq := httptest.NewRequest(http.MethodPost, callbackURL, strings.NewReader(`{"street":"1 Main St","city":"Springfield","country":"US"}`))
+	identicalReq.Header.Set("Content-Type", "application/json")
+	identicalReq.Header.Set(csrfHeaderName, credentials.CSRFToken)
+	addWebsheetAuthCookies(identicalReq, credentials)
+	identicalRec := httptest.NewRecorder()
+	server.handleWebsheet(identicalRec, identicalReq)
+	if identicalRec.Code != http.StatusOK {
+		t.Fatalf("identical callback retry status = %d, body=%s", identicalRec.Code, identicalRec.Body.String())
+	}
+	differentReq := httptest.NewRequest(http.MethodPost, callbackURL, strings.NewReader(`{"street":"2 Main St","city":"Springfield","country":"US"}`))
+	differentReq.Header.Set("Content-Type", "application/json")
+	differentReq.Header.Set(csrfHeaderName, credentials.CSRFToken)
+	addWebsheetAuthCookies(differentReq, credentials)
+	differentRec := httptest.NewRecorder()
+	server.handleWebsheet(differentRec, differentReq)
+	if differentRec.Code != http.StatusConflict {
+		t.Fatalf("different callback retry status = %d, want 409", differentRec.Code)
+	}
 
-	doneURL := strings.Replace(embedURL, "?", "/done?", 1)
+	doneURL := embedURL + "/done"
+	doneReq := httptest.NewRequest(http.MethodPost, doneURL, nil)
+	doneReq.Header.Set(csrfHeaderName, credentials.CSRFToken)
+	addWebsheetAuthCookies(doneReq, credentials)
 	doneRec := httptest.NewRecorder()
-	server.handleWebsheet(doneRec, httptest.NewRequest(http.MethodPost, doneURL, nil))
+	server.handleWebsheet(doneRec, doneReq)
 	if doneRec.Code != http.StatusOK {
 		t.Fatalf("done status = %d", doneRec.Code)
 	}
+
+	// 4. A short-lived tombstone makes identical callback and done retries safe.
+	replayReq := httptest.NewRequest(http.MethodPost, callbackURL, strings.NewReader(`{"street":"1 Main St","city":"Springfield","country":"US"}`))
+	replayReq.Header.Set("Content-Type", "application/json")
+	replayReq.Header.Set(csrfHeaderName, credentials.CSRFToken)
+	addWebsheetAuthCookies(replayReq, credentials)
+	replayRec := httptest.NewRecorder()
+	server.handleWebsheet(replayRec, replayReq)
+	if replayRec.Code != http.StatusOK {
+		t.Fatalf("identical callback replay status = %d, want 200", replayRec.Code)
+	}
+	stored, err = database.AppSetting(context.Background(), "e911_address:dev1")
+	if err != nil || strings.Contains(string(stored.Value), "2 Main St") {
+		t.Fatalf("callback replay changed stored address: %v %v", stored, err)
+	}
+	replayDoneReq := httptest.NewRequest(http.MethodPost, doneURL, nil)
+	replayDoneReq.Header.Set(csrfHeaderName, credentials.CSRFToken)
+	addWebsheetAuthCookies(replayDoneReq, credentials)
+	replayDoneRec := httptest.NewRecorder()
+	server.handleWebsheet(replayDoneRec, replayDoneReq)
+	if replayDoneRec.Code != http.StatusOK {
+		t.Fatalf("done replay status = %d, want 200", replayDoneRec.Code)
+	}
+	postDoneDifferentReq := httptest.NewRequest(http.MethodPost, callbackURL, strings.NewReader(`{"street":"2 Main St","city":"Springfield","country":"US"}`))
+	postDoneDifferentReq.Header.Set("Content-Type", "application/json")
+	postDoneDifferentReq.Header.Set(csrfHeaderName, credentials.CSRFToken)
+	addWebsheetAuthCookies(postDoneDifferentReq, credentials)
+	postDoneDifferentRec := httptest.NewRecorder()
+	server.handleWebsheet(postDoneDifferentRec, postDoneDifferentReq)
+	if postDoneDifferentRec.Code != http.StatusConflict {
+		t.Fatalf("different post-done callback status = %d, want 409", postDoneDifferentRec.Code)
+	}
 }
 
-func TestE911WebsheetRejectsBadToken(t *testing.T) {
-	server := &Server{logger: regionTestLogger(), websheets: newWebsheetManager()}
-	session := server.websheets.create("dev1")
-	recorder := httptest.NewRecorder()
-	server.handleWebsheet(recorder, httptest.NewRequest(http.MethodGet, "/websheets/"+session.id+"?token=wrong", nil))
-	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("bad token status = %d, want 403", recorder.Code)
-	}
+func addWebsheetAuthCookies(request *http.Request, credentials auth.Credentials) {
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: credentials.SessionToken})
+	request.AddCookie(&http.Cookie{Name: csrfCookieName, Value: credentials.CSRFToken})
 }
 
 // readSSEEvent reads one Server-Sent-Events frame ("event:"/"data:" lines

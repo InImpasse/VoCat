@@ -303,6 +303,10 @@ func TestTelegramErrorsRedactBotTokens(t *testing.T) {
 	if strings.Contains(redacted.Error(), token) || !strings.Contains(redacted.Error(), "bot[REDACTED]") {
 		t.Fatalf("redacted error = %q", redacted)
 	}
+	upstreamErr := telegramAPIResponseError("getUpdates", 502, "upstream reflected "+token, token)
+	if strings.Contains(upstreamErr.Error(), token) || !strings.Contains(upstreamErr.Error(), "[REDACTED]") {
+		t.Fatalf("upstream response error = %q", upstreamErr)
+	}
 }
 
 func TestTelegramCallTransportFollowsConfiguredCardMode(t *testing.T) {

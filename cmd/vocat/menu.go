@@ -19,7 +19,6 @@ import (
 	"vocat/internal/auth"
 	"vocat/internal/config"
 	"vocat/internal/store"
-	"vocat/internal/update"
 )
 
 // envFilePath carries non-secret service settings such as the Web listen port.
@@ -91,7 +90,7 @@ func menuEnvFilePath() string {
 }
 
 // runMenu is the interactive lifecycle menu: toggle language, reset credentials,
-// change the Web listener port, restart the managed service, self-update, or
+// change the Web listener port, restart the managed service, show the update policy, or
 // fully uninstall vocat. It must run as root on the host because it manages the
 // systemd/procd service and the 0600 env file. Docker deployments do not use it.
 func runMenu(logger *slog.Logger) error {
@@ -580,21 +579,10 @@ func waitForMenuServiceActive(manager menuServiceManager, timeout time.Duration)
 	return fmt.Errorf("%w: service is not active: %s", errRestartFailed, lastOutput)
 }
 
-// menuUpdate delegates to the self-updater in internal/update. It resolves the
-// repo the same way update.Run itself does ($VOCAT_REPO or the default) and lets
-// that package handle the check/download/verify/replace/restart flow. The
-// running menu process keeps the old binary until the operator exits; only the
-// systemd service runs the new build after restartService.
-func menuUpdate(m *menu, logger *slog.Logger) error {
-	repo := strings.TrimSpace(os.Getenv("VOCAT_REPO"))
-	if repo == "" {
-		repo = update.DefaultRepository
-	}
-	fmt.Println(m.updateChecking())
-	if err := update.Run(logger, []string{"--repo", repo}); err != nil {
-		logger.Error("menu update failed", "error", err)
-		return fmt.Errorf("%w: %v", errUpdateFailed, err)
-	}
+// menuUpdate reports the hardened update policy. Runtime download and binary
+// replacement are intentionally unreachable from the management process.
+func menuUpdate(m *menu, _ *slog.Logger) error {
+	fmt.Println(m.updateDisabled())
 	return nil
 }
 
@@ -646,7 +634,6 @@ var (
 	errPasswordsDiffer    = errors.New("menu: passwords do not match")
 	errNoServiceManager   = errors.New("menu: no supported service manager")
 	errRestartFailed      = errors.New("menu: restart failed")
-	errUpdateFailed       = errors.New("menu: update failed")
 	errMenuConfig         = errors.New("menu: load configuration")
 	errMenuStore          = errors.New("menu: open database")
 	errMenuAuth           = errors.New("menu: auth service")
@@ -670,7 +657,7 @@ func (m *menu) msg(key string) string {
 		"opt_change":          {"2) 修改账号密码", "2) Change admin credentials"},
 		"opt_port":            {"3) 修改 Web 监听端口", "3) Change Web listening port"},
 		"opt_restart":         {"4) 重启软件", "4) Restart software"},
-		"opt_update":          {"5) 更新软件", "5) Update software"},
+		"opt_update":          {"5) 查看更新策略", "5) Show update policy"},
 		"opt_uninstall":       {"0) 卸载软件", "0) Uninstall software"},
 		"prompt":              {"请选择: ", "Select: "},
 		"invalid":             {"无效选项，请重试。按 Ctrl+C 退出。", "Invalid choice, try again. Press Ctrl+C to exit."},
@@ -691,7 +678,7 @@ func (m *menu) msg(key string) string {
 			"语言已切换。Web 界面下次刷新后同步。",
 			"Language switched. The web UI syncs on next refresh.",
 		},
-		"upd_checking": {"正在检查更新…", "Checking for updates…"},
+		"upd_disabled": {"运行时自更新已禁用；请部署经过验证的加固构建。", "Runtime self-update is disabled; deploy a verified hardened build."},
 		"restarted":    {"软件已重启。", "Software restarted."},
 		"uninstall_warn": {
 			"警告: 将删除程序、数据与配置,且不可恢复!",
@@ -731,7 +718,7 @@ func (m *menu) webPortChanged(address string) string {
 }
 func (m *menu) reverseProxyNotice() string { return m.msg("reverse_proxy_notice") }
 func (m *menu) languageSwitched() string   { return m.msg("lang_switched") }
-func (m *menu) updateChecking() string     { return m.msg("upd_checking") }
+func (m *menu) updateDisabled() string     { return m.msg("upd_disabled") }
 func (m *menu) restarted() string          { return m.msg("restarted") }
 func (m *menu) uninstallWarn() string      { return m.msg("uninstall_warn") }
 func (m *menu) uninstallConfirm() string   { return m.msg("uninstall_confirm") }
@@ -766,12 +753,6 @@ func (m *menu) errorPrefix(err error) string {
 			return "Restart failed."
 		}
 		return "重启失败。"
-	case errors.Is(err, errUpdateFailed):
-		detail := strings.TrimPrefix(err.Error(), errUpdateFailed.Error()+": ")
-		if m.lang == "en" {
-			return "Update failed: " + detail
-		}
-		return "更新失败: " + detail
 	case errors.Is(err, errMenuConfig):
 		if m.lang == "en" {
 			return "Failed to load configuration."

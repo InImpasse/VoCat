@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../../api";
+import { useEffect, useRef, useState } from "react";
 import { Modal } from "../ui";
 import { useI18n } from "../../lib/i18n";
 
@@ -20,90 +19,36 @@ export function CarrierWebsheetDialog({ open, websheet, onClose, onDone }: Carri
   const { t } = useI18n();
   const [loaded, setLoaded] = useState(false);
   const doneRef = useRef(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const embedUrl = websheet?.embedUrl || "";
-  const token = useMemo(() => {
-    if (!embedUrl) return "";
-    try {
-      return new URL(embedUrl, window.location.origin).searchParams.get("token") || "";
-    } catch {
-      return "";
-    }
-  }, [embedUrl]);
 
   useEffect(() => {
     setLoaded(false);
+    doneRef.current = false;
   }, [websheet?.id]);
 
   useEffect(() => {
-    function shouldIgnore(callback: unknown): boolean {
-      if (!callback || typeof callback !== "object") return true;
-      const c = callback as Record<string, unknown>;
-      const k = String(c.event ?? c.method ?? c.resultCode ?? "").toLowerCase();
-      return k ? !k.includes("phoneservicesaccountstatuschanged") : true;
-    }
-    function isValid(data: unknown): data is { type: string; token?: string; callback?: unknown } {
+    function isValid(data: unknown): data is { type: string } {
       if (!data || typeof data !== "object") return false;
       const d = data as Record<string, unknown>;
-      if (d.type !== "vohive-websheet-callback") return false;
-      const t = typeof d.token === "string" ? d.token : "";
-      return !(token && t && t !== token);
+      return d.type === "vohive-websheet-callback";
     }
-    async function relay(callback: unknown) {
-      const id = websheet?.id;
-      if (!id || !callback || typeof callback !== "object") return;
-      try {
-        await api(`/websheets/${id}/callback`, { method: "POST", body: callback });
-      } catch (e) {
-        console.error("[CarrierWebsheetDialog] relay callback failed:", e);
-      }
-    }
-    async function done() {
+    function done() {
       if (doneRef.current) return;
       doneRef.current = true;
-      try {
-        const id = websheet?.id;
-        if (id) {
-          try {
-            await api(`/websheets/${id}/done`, { method: "POST" });
-          } catch (e) {
-            console.error("[CarrierWebsheetDialog] complete websheet failed:", e);
-          }
-        }
-        onDone();
-        onClose();
-      } finally {
-        doneRef.current = false;
-      }
+      onDone();
+      onClose();
     }
-    function handle(data: unknown) {
-      if (!open || !isValid(data)) return;
-      if (shouldIgnore(data.callback)) void done();
-      else void relay(data.callback);
-    }
-    const onMessage = (e: MessageEvent) => handle(e.data);
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== "vohive-websheet-complete" || !e.newValue) return;
-      try {
-        handle(JSON.parse(e.newValue));
-      } catch {
-        /* ignore */
-      }
+    const onMessage = (event: MessageEvent) => {
+      if (!open || event.origin !== window.location.origin) return;
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      if (isValid(event.data)) done();
     };
     window.addEventListener("message", onMessage);
-    window.addEventListener("storage", onStorage);
-    let channel: BroadcastChannel | null = null;
-    try {
-      channel = new BroadcastChannel("vohive-websheet");
-      channel.onmessage = (e) => handle(e.data);
-    } catch {
-      channel = null;
-    }
     return () => {
       window.removeEventListener("message", onMessage);
-      window.removeEventListener("storage", onStorage);
-      channel?.close();
     };
-  }, [open, websheet?.id, token, onClose, onDone]);
+  }, [open, websheet?.id, onClose, onDone]);
 
   return (
     <Modal open={open} onClose={onClose} title={websheet?.title || t("E911地址")} width="max-w-[min(390px,94vw)]">
@@ -115,10 +60,11 @@ export function CarrierWebsheetDialog({ open, websheet, onClose, onDone }: Carri
         ) : null}
         {embedUrl ? (
           <iframe
+            ref={iframeRef}
             src={embedUrl}
             title={websheet?.title || t("E911地址")}
             className="block h-full w-full border-0"
-            sandbox="allow-forms allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"
+            sandbox="allow-forms allow-same-origin allow-scripts"
             onLoad={() => setLoaded(true)}
           />
         ) : null}

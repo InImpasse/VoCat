@@ -31,16 +31,8 @@ Usage:
                      carrier-profiles.d and takes effect after restart.
                      Flags: --bundle NAME --id ID --document-only --install
                             --profile-dir DIR.
-  vocat update       Check GitHub for a newer release and self-update.
-                     Flags:
-                       --check           Only report whether an update is available.
-                       --repo owner/name GitHub repository (default: $VOCAT_REPO or MengMengCode/VoCat).
-                       --target path     Binary to replace (default: running exe).
-                       --force           Reinstall even at the same version.
-                     Environment:
-                       VOCAT_REPO        Fallback for --repo.
-                       GITHUB_TOKEN      Optional bearer token for private repos
-                                         or higher rate limits.
+  vocat update       Disabled in hardened builds. Install a verified artifact
+                     through the external deployment and rollback workflow.
   vocat menu         Interactive lifecycle menu (root on the host):
                        toggle language, change password, change the Web port,
                        restart, update, uninstall.

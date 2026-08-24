@@ -2359,7 +2359,10 @@ func (bot *telegramBot) loadConfig(ctx context.Context) (telegramRuntimeConfig, 
 	return config, true, nil
 }
 
-func (bot *telegramBot) call(ctx context.Context, config telegramRuntimeConfig, method string, payload any, result any) error {
+func (bot *telegramBot) call(ctx context.Context, config telegramRuntimeConfig, method string, payload any, result any) (callErr error) {
+	defer func() {
+		callErr = redactTelegramError(callErr, config.Token)
+	}()
 	// Telegram polling is a long-lived notification channel and must use the
 	// same administrator-configured destination exceptions as test messages,
 	// SMS pushes and automatic-task notifications. This keeps SSRF protection
@@ -2397,7 +2400,7 @@ func (bot *telegramBot) call(ctx context.Context, config telegramRuntimeConfig, 
 		return fmt.Errorf("decode Telegram response: %w", err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 || !envelope.OK {
-		return fmt.Errorf("Telegram %s failed: HTTP %d %s", method, response.StatusCode, envelope.Description)
+		return telegramAPIResponseError(method, response.StatusCode, envelope.Description, config.Token)
 	}
 	if result != nil && len(envelope.Result) != 0 {
 		if err := json.Unmarshal(envelope.Result, result); err != nil {
@@ -2405,6 +2408,13 @@ func (bot *telegramBot) call(ctx context.Context, config telegramRuntimeConfig, 
 		}
 	}
 	return nil
+}
+
+func telegramAPIResponseError(method string, statusCode int, description string, token string) error {
+	return redactTelegramError(
+		fmt.Errorf("Telegram %s failed: HTTP %d %s", method, statusCode, description),
+		token,
+	)
 }
 
 func (bot *telegramBot) notificationDestinationContext(ctx context.Context) context.Context {
@@ -2446,7 +2456,7 @@ func (bot *telegramBot) warn(message string, err error) {
 		return
 	}
 	now := time.Now()
-	text := redactTelegramText(err.Error(), "")
+	text := redactTelegramText(notificationErrorText(err), "")
 	bot.logMu.Lock()
 	if text == bot.lastLogText && now.Sub(bot.lastLogTime) < time.Minute {
 		bot.logMu.Unlock()
@@ -2461,7 +2471,7 @@ func redactTelegramError(err error, token string) error {
 	if err == nil {
 		return nil
 	}
-	return errors.New(redactTelegramText(err.Error(), token))
+	return errors.New(redactTelegramText(notificationErrorText(err), token))
 }
 
 func redactTelegramText(value, token string) string {

@@ -31,7 +31,6 @@ import (
 	"vocat/internal/pcsc"
 	"vocat/internal/server"
 	"vocat/internal/store"
-	"vocat/internal/update"
 	"vocat/internal/vowifi"
 	"vocat/internal/vowifi/ike"
 	"vocat/internal/vowifi/ims"
@@ -73,10 +72,8 @@ func main() {
 	case "version", "-v", "--version":
 		runVersion()
 	case "update":
-		if err := update.Run(logger, rest); err != nil {
-			logger.Error("update failed", "error", err)
-			os.Exit(1)
-		}
+		fmt.Fprintln(os.Stderr, "vocat: runtime self-update is disabled; install a verified hardened build through the deployment workflow")
+		os.Exit(2)
 	case "doctor":
 		if err := runDoctor(rest); err != nil {
 			logger.Error("doctor failed", "error", err)
@@ -93,9 +90,6 @@ func main() {
 			os.Exit(1)
 		}
 	case "develop":
-		// Hidden subcommand: intentionally not listed in printUsage or the
-		// interactive menu. It toggles the developer-mode flag that gates the
-		// entire plugin/extension system; the flag takes effect on next start.
 		if err := runDevelop(rest, logger); err != nil {
 			logger.Error("develop failed", "error", err)
 			os.Exit(2)
@@ -147,16 +141,17 @@ func run(logger *slog.Logger, logs *loghub.Hub) error {
 		return err
 	}
 	defer database.Close()
-	developerEnabled := isDeveloperEnabled(startupContext, database)
+	// Hardened builds never create the plugin or Export Proxy managers. Clear
+	// persisted experimental state on every start so an older database cannot
+	// reactivate those surfaces after an upstream merge.
+	const developerEnabled = false
 	pluginRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "plugins")
 	legacyExportProxyConfig := filepath.Join(pluginRoot, exportproxy.ReservedID, "data", "configs.json")
-	if !developerEnabled {
-		if err := developer.ResetExperimental(startupContext, database); err != nil {
-			return fmt.Errorf("reset disabled developer settings: %w", err)
-		}
-		if err := exportproxy.RemoveLegacyConfig(legacyExportProxyConfig); err != nil {
-			return fmt.Errorf("remove legacy export proxy configuration: %w", err)
-		}
+	if err := developer.ResetExperimental(startupContext, database); err != nil {
+		return fmt.Errorf("reset disabled developer settings: %w", err)
+	}
+	if err := exportproxy.RemoveLegacyConfig(legacyExportProxyConfig); err != nil {
+		return fmt.Errorf("remove legacy export proxy configuration: %w", err)
 	}
 	httpsManager, err := httpsmode.New(
 		startupContext,
@@ -277,8 +272,7 @@ func run(logger *slog.Logger, logs *loghub.Hub) error {
 		Extensions:          extensionManager,
 		ExportProxy:         exportProxyManager,
 		DeveloperEnabled:    developerEnabled,
-		UpdateRepository:    strings.TrimSpace(os.Getenv("VOCAT_REPO")),
-		UpdateToken:         strings.TrimSpace(os.Getenv("GITHUB_TOKEN")),
+		UpdatesEnabled:      false,
 		HTTPS:               httpsManager,
 	})
 	if err != nil {
@@ -318,11 +312,7 @@ func run(logger *slog.Logger, logs *loghub.Hub) error {
 	}
 	plainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if httpsManager.Enabled() {
-			host := strings.TrimSpace(r.Host)
-			if host == "" {
-				host = cfg.Address
-			}
-			http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), http.StatusPermanentRedirect)
+			http.Redirect(w, r, httpsRedirectTarget(r, cfg.Address), http.StatusPermanentRedirect)
 			return
 		}
 		handler.ServeHTTP(w, r)
@@ -389,6 +379,35 @@ func run(logger *slog.Logger, logs *loghub.Hub) error {
 		}
 	}
 	return nil
+}
+
+// httpsRedirectTarget derives the authority from the accepted socket rather
+// than the attacker-controlled Host header. A real net/http server always sets
+// LocalAddrContextKey; the listener fallback exists for direct unit calls.
+func httpsRedirectTarget(r *http.Request, listenerAddress string) string {
+	authority := strings.TrimSpace(listenerAddress)
+	if local, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok {
+		if candidate := strings.TrimSpace(local.String()); candidate != "" {
+			authority = candidate
+		}
+	}
+	host, port, err := net.SplitHostPort(authority)
+	if err != nil {
+		host, port = "127.0.0.1", "7575"
+	}
+	parsedHost := net.ParseIP(strings.Trim(host, "[]"))
+	if parsedHost != nil && parsedHost.IsUnspecified() {
+		if parsedHost.To4() == nil {
+			host = "::1"
+		} else {
+			host = "127.0.0.1"
+		}
+	}
+	target := *r.URL
+	target.Scheme = "https"
+	target.Host = net.JoinHostPort(host, port)
+	target.User = nil
+	return target.String()
 }
 
 func configureDeviceBackends(

@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// EsimDownloadParams are the SPA download form fields, mapped from the
-// snake_case query params by the HTTP layer.
+// EsimDownloadParams are the SPA download form fields decoded from the
+// snake_case POST JSON body by the HTTP layer.
 type EsimDownloadParams struct {
 	SMDP             string
 	MatchingID       string

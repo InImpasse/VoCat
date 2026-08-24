@@ -26,6 +26,9 @@ func TestResetExperimentalRestoresDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	enabled, _ := json.Marshal(map[string]bool{"enabled": true})
+	if err := database.UpsertAppSetting(ctx, store.AppSetting{Key: EnabledSettingKey, Value: enabled}); err != nil {
+		t.Fatal(err)
+	}
 	if err := database.UpsertAppSetting(ctx, store.AppSetting{Key: httpsmode.SettingKey, Value: enabled}); err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +70,9 @@ func TestResetExperimentalRestoresDefaults(t *testing.T) {
 	}
 	if _, err := database.AppSetting(ctx, exportproxy.SettingKey); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("export proxy configurations were not deleted: %v", err)
+	}
+	if _, err := database.AppSetting(ctx, EnabledSettingKey); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("developer mode flag was not deleted: %v", err)
 	}
 }
 

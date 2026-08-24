@@ -102,6 +102,9 @@ func ResetExperimental(ctx context.Context, database *store.Store) error {
 		return err
 	}
 	var resetErrors []error
+	if err := database.DeleteAppSetting(ctx, EnabledSettingKey); err != nil && !errors.Is(err, store.ErrNotFound) {
+		resetErrors = append(resetErrors, fmt.Errorf("delete developer mode flag: %w", err))
+	}
 	if err := database.UpsertAppSetting(ctx, store.AppSetting{Key: httpsmode.SettingKey, Value: httpsValue}); err != nil {
 		resetErrors = append(resetErrors, fmt.Errorf("reset self-signed HTTPS: %w", err))
 	}

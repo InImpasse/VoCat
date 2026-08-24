@@ -40,14 +40,14 @@ func (s *Server) handleDeveloperSettings(w http.ResponseWriter, r *http.Request)
 				writeError(w, http.StatusBadRequest, "invalid_device_limit", err.Error())
 				return
 			}
-			s.recordAudit(r.Context(), "admin", "settings.developer.device_limit", "settings", "developer", "success", "device limit updated")
+			s.audit(r, "settings.developer.device_limit", "settings", "developer", "success")
 		}
 		if request.SMSHourlyLimit != nil {
 			if err := developer.SetSMSHourlyLimit(r.Context(), s.store, *request.SMSHourlyLimit); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid_sms_hourly_limit", err.Error())
 				return
 			}
-			s.recordAudit(r.Context(), "admin", "settings.developer.sms_hourly_limit", "settings", "developer", "success", "global SMS hourly limit updated")
+			s.audit(r, "settings.developer.sms_hourly_limit", "settings", "developer", "success")
 		}
 		s.writeDeveloperSettings(w, r)
 	default:

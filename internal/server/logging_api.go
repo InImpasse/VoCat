@@ -82,14 +82,19 @@ func (s *Server) applyLogRetention(ctx context.Context) error {
 	}
 }
 
+func (s *Server) applyPeriodicRetention(ctx context.Context, now time.Time) error {
+	_, auditErr := s.store.PruneAuditEvents(ctx, now.UTC().Add(-store.AuditRetention))
+	return errors.Join(auditErr, s.applyLogRetention(ctx))
+}
+
 // StartLogRetentionLoop enforces the retention policy once at startup and then
 // on the given interval until the context is cancelled.
 func (s *Server) StartLogRetentionLoop(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = time.Minute
 	}
-	if err := s.applyLogRetention(ctx); err != nil {
-		s.logger.Warn("apply log retention failed", "error", err)
+	if err := s.applyPeriodicRetention(ctx, time.Now()); err != nil {
+		s.logger.Warn("apply event retention failed", "error", err)
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -98,8 +103,8 @@ func (s *Server) StartLogRetentionLoop(ctx context.Context, interval time.Durati
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := s.applyLogRetention(ctx); err != nil {
-				s.logger.Warn("apply log retention failed", "error", err)
+			if err := s.applyPeriodicRetention(ctx, time.Now()); err != nil {
+				s.logger.Warn("apply event retention failed", "error", err)
 			}
 		}
 	}

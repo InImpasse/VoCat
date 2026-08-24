@@ -37,6 +37,20 @@ func TestBootstrapAdminOnlyInitializesAnEmptyDatabase(t *testing.T) {
 	}
 }
 
+func TestBootstrapAdminEnforcesPasswordPolicyBeforeExistingDatabaseCheck(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vocat.db")
+	withBootstrapStdin(t, "first-secure-password\n", func() {
+		if err := runBootstrapAdmin([]string{"--database", path}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	withBootstrapStdin(t, "too-short\n", func() {
+		if err := runBootstrapAdmin([]string{"--database", path}); err == nil {
+			t.Fatal("bootstrap accepted a weak password for an existing database")
+		}
+	})
+}
+
 func withBootstrapStdin(t *testing.T, input string, action func()) {
 	t.Helper()
 	original := os.Stdin

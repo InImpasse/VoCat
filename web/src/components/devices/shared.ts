@@ -3,7 +3,7 @@ import { message } from "../ui";
 import type { DeviceDetail, DeviceModem, ModemPnn } from "./types";
 import { tl } from "../../lib/i18n";
 import { lookupCarrier } from "../../lib/carrier";
-import { notifyUnauthorized } from "../../api";
+import { api } from "../../api";
 
 /* ---------------------------------------------------------------------------
  * Lifecycle / status helpers (ported from the VoHive reference).
@@ -287,10 +287,16 @@ export interface EventStreamHandlers {
   signal?: AbortSignal;
 }
 
+export interface EventStreamRequest {
+  method?: "GET" | "POST";
+  body?: unknown;
+}
+
 export async function readEventStream(
   path: string,
   params: Record<string, string | undefined>,
   handlers: EventStreamHandlers,
+  request: EventStreamRequest = {},
 ): Promise<void> {
   const qs = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -298,13 +304,13 @@ export async function readEventStream(
   }
   const query = qs.toString();
   const url = `${path.startsWith("/api") ? path : `/api${path}`}${query ? `?${query}` : ""}`;
-  const response = await fetch(url, {
-    method: "GET",
+  const response = await api<Response>(url, {
+    method: request.method || "GET",
+    body: request.body,
+    raw: true,
     headers: { Accept: "text/event-stream" },
-    credentials: "include",
     signal: handlers.signal,
   });
-  if (response.status === 401) notifyUnauthorized();
   if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
   if (!response.body) throw new Error("No stream body");
 

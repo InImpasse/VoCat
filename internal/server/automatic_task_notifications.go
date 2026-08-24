@@ -63,16 +63,16 @@ func (s *Server) notifyAutomaticTask(ctx context.Context, task store.AutomaticTa
 			continue
 		}
 		if err != nil {
-			s.logger.Warn("read automatic task notification setting", "channel", channel, "error", err)
+			s.logger.Warn("read automatic task notification setting", "channel", channel, "error", notificationErrorText(err))
 			continue
 		}
 		var config map[string]any
 		if err := json.Unmarshal(setting.Config, &config); err != nil {
-			s.logger.Warn("decode automatic task notification setting", "channel", channel, "error", err)
+			s.logger.Warn("decode automatic task notification setting", "channel", channel, "error", notificationErrorText(err, setting))
 			continue
 		}
 		if err := sendAutomaticTaskNotification(ctx, channel, config, notification); err != nil {
-			s.logger.Warn("send automatic task notification", "channel", channel, "task_id", task.ID, "error", err)
+			s.logger.Warn("send automatic task notification", "channel", channel, "task_id", task.ID, "error", notificationErrorText(err, setting))
 		}
 	}
 }

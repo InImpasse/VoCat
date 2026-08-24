@@ -31,7 +31,7 @@ func (s *Server) handleHTTPSSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		state = s.https.State(r.Host)
-		s.recordAudit(r.Context(), "admin", "settings.https.update", "settings", "https", "success", map[bool]string{true: "enabled", false: "disabled"}[request.Enabled])
+		s.audit(r, "settings.https.update", "settings", "https", "success")
 		writeJSON(w, http.StatusOK, map[string]any{"data": state})
 	default:
 		w.Header().Set("Allow", "GET, PUT")

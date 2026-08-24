@@ -109,7 +109,7 @@ async function requestAPI<T>(path: string, options: RequestOptions, retryCSRF: b
   const method = (options.method || "GET").toUpperCase();
   const headers = new Headers(options.headers);
   const formBody = typeof FormData !== "undefined" && options.body instanceof FormData;
-  headers.set("Accept", options.raw ? "*/*" : "application/json");
+  if (!headers.has("Accept")) headers.set("Accept", options.raw ? "*/*" : "application/json");
   if (options.body !== undefined && !formBody) headers.set("Content-Type", "application/json");
   if (isMutation(method)) {
     const csrf = sessionStorage.getItem(CSRF_KEY);
@@ -200,6 +200,7 @@ export function updateSecuritySettings(settings: {
   mode: SecuritySettings["mode"];
   allowedCidrs: string[];
   trustProxyHeaders: boolean;
+  trustedProxyCidrs: string[];
 }) {
   return api<SecuritySettings>("/settings/security", { method: "PUT", body: settings });
 }

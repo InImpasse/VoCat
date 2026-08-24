@@ -29,8 +29,8 @@ func runBootstrapAdmin(args []string) error {
 		return fmt.Errorf("read password: %w", err)
 	}
 	password = strings.TrimSuffix(strings.TrimSuffix(password, "\n"), "\r")
-	if password == "" {
-		return errors.New("bootstrap password cannot be empty")
+	if err := auth.ValidatePassword(password); err != nil {
+		return fmt.Errorf("bootstrap password: %w", err)
 	}
 	adminUsername := strings.TrimSpace(*username)
 	if len(adminUsername) < 1 || len(adminUsername) > 64 || strings.ContainsAny(adminUsername, "\r\n\t") {

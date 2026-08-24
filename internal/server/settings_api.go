@@ -476,7 +476,7 @@ func (s *Server) handleNotificationTest(
 		err = sendLarkNotificationTest(notificationContext, resolved)
 	}
 	if err != nil {
-		redacted := store.RedactText(err.Error(), provider)
+		redacted := notificationErrorText(err, provider)
 		if s.logger != nil {
 			s.logger.Warn(
 				"notification connectivity test failed",

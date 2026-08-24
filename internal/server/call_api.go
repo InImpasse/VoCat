@@ -146,7 +146,7 @@ func (s *Server) handleCallAction(w http.ResponseWriter, r *http.Request, config
 				go s.hangupVoWiFiAfter(config.ID, callID, duration)
 			}
 		}
-		s.recordAudit(r.Context(), "admin", "call."+action, "device", config.ID, "success", transport)
+		s.audit(r, "call."+action, "device", config.ID, "success")
 		writeJSON(w, http.StatusAccepted, map[string]any{"data": map[string]any{
 			"accepted": true, "action": action, "number": number, "call_id": callID,
 			"duration_seconds": int(duration / time.Second), "transport": transport, "call": result,
@@ -174,7 +174,7 @@ func (s *Server) handleCallAction(w http.ResponseWriter, r *http.Request, config
 			go s.hangupAfter(config.ID, physicalID, duration)
 		}
 	}
-	s.recordAudit(r.Context(), "admin", "call."+action, "device", config.ID, "success", transport)
+	s.audit(r, "call."+action, "device", config.ID, "success")
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"data": map[string]any{
 			"accepted": true, "action": action, "number": number,

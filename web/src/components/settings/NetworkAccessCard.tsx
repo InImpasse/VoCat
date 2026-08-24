@@ -17,6 +17,7 @@ export interface NetworkAccessForm {
   mode: SecuritySettings["mode"];
   allowedCidrs: string[];
   trustProxyHeaders: boolean;
+  trustedProxyCidrs: string[];
 }
 
 const LABEL_CLASS = "text-xs font-bold text-gray-500 uppercase tracking-wider";
@@ -42,6 +43,8 @@ export function NetworkAccessCard({
   const { t } = useI18n();
   const cidrs = value.allowedCidrs;
   const setCidrs = (next: string[]) => onChange({ allowedCidrs: next });
+  const trustedProxyCidrs = value.trustedProxyCidrs;
+  const setTrustedProxyCidrs = (next: string[]) => onChange({ trustedProxyCidrs: next });
 
   return (
     <div className="ui-card group relative overflow-hidden p-8 lg:col-span-2">
@@ -81,7 +84,7 @@ export function NetworkAccessCard({
             <p className="-mt-3 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
               {value.mode === "public"
                 ? t("允许任意来源 IP 访问（含公网）。仅在已设置强密码且网络环境可信时使用。")
-                : t("默认仅允许内网网段访问：10/8、172.16/12、192.168/16、169.254/16、127/8、::1、fe80::/10、fc00::/7。")}
+                : t("默认仅允许内网和 Tailscale 网段访问：10/8、172.16/12、192.168/16、100.64/10、169.254/16、127/8、::1、fe80::/10、fc00::/7。")}
             </p>
           </div>
 
@@ -136,7 +139,7 @@ export function NetworkAccessCard({
                 {t("信任代理请求头")}
               </div>
               <p className="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
-                {t("仅在系统位于可信反向代理之后时开启，按 X-Forwarded-For 判定来源；否则客户端可伪造该头绕过内网限制。")}
+                {t("仅接收来自下方可信代理网段的 X-Forwarded-For 或 X-Real-IP。代理必须丢弃客户端传入的同名头并重新生成。")}
               </p>
             </div>
             <Switch
@@ -145,6 +148,54 @@ export function NetworkAccessCard({
               ariaLabel={t("信任代理请求头")}
             />
           </div>
+
+          {value.trustProxyHeaders ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className={LABEL_CLASS}>{t("可信代理网段")}</label>
+                <Button
+                  size="small"
+                  variant="primary"
+                  plain
+                  onClick={() => setTrustedProxyCidrs([...trustedProxyCidrs, ""])}
+                >
+                  <AddRegular />
+                  <span className="ml-1">{t("添加代理网段")}</span>
+                </Button>
+              </div>
+              <p className="text-[10px] text-gray-400">
+                {t("仅直连来源命中这些 CIDR 时才信任代理请求头。")}
+              </p>
+              {trustedProxyCidrs.length === 0 ? (
+                <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+                  <WarningRegular className="shrink-0" />
+                  <span>{t("未配置可信代理网段，代理请求头不会生效")}</span>
+                </div>
+              ) : null}
+              {trustedProxyCidrs.map((cidr, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <Input
+                    value={cidr}
+                    onChange={(event) =>
+                      setTrustedProxyCidrs(
+                        trustedProxyCidrs.map((item, i) => (i === index ? event.target.value : item)),
+                      )
+                    }
+                    placeholder="192.168.1.10/32"
+                    className="flex-1 font-mono"
+                  />
+                  <Button
+                    variant="danger"
+                    plain
+                    onClick={() => setTrustedProxyCidrs(trustedProxyCidrs.filter((_, i) => i !== index))}
+                    aria-label={t("删除")}
+                  >
+                    <DeleteRegular />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : null}
 
           {!clientAllowed && (
             <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">

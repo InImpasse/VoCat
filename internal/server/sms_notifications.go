@@ -72,9 +72,10 @@ func (s *Server) runSMSNotificationChannel(ctx context.Context, channel string) 
 		if !cursorInitialized {
 			latest, err := s.store.LatestSMSMessageID(ctx)
 			if err != nil {
-				if err.Error() != lastError || time.Since(lastErrorAt) >= time.Minute {
-					s.logSMSNotificationError(channel, err)
-					lastError, lastErrorAt = err.Error(), time.Now()
+				errorText := notificationErrorText(err)
+				if errorText != lastError || time.Since(lastErrorAt) >= time.Minute {
+					s.logSMSNotificationError(channel, errorText)
+					lastError, lastErrorAt = errorText, time.Now()
 				}
 				if !waitTelegram(ctx, smsNotificationPollInterval) {
 					return
@@ -84,11 +85,12 @@ func (s *Server) runSMSNotificationChannel(ctx context.Context, channel string) 
 			cursor, cursorInitialized = latest, true
 			lastError = ""
 		}
-		config, enabled, configErr := s.smsNotificationConfig(ctx, channel)
+		config, setting, enabled, configErr := s.smsNotificationConfig(ctx, channel)
 		if configErr != nil {
-			if configErr.Error() != lastError || time.Since(lastErrorAt) >= time.Minute {
-				s.logSMSNotificationError(channel, configErr)
-				lastError, lastErrorAt = configErr.Error(), time.Now()
+			errorText := notificationErrorText(configErr, setting)
+			if errorText != lastError || time.Since(lastErrorAt) >= time.Minute {
+				s.logSMSNotificationError(channel, errorText)
+				lastError, lastErrorAt = errorText, time.Now()
 			}
 		} else if !enabled {
 			if newest, latestErr := s.store.LatestSMSMessageID(ctx); latestErr == nil {
@@ -98,17 +100,19 @@ func (s *Server) runSMSNotificationChannel(ctx context.Context, channel string) 
 		} else {
 			messages, listErr := s.store.ListInboundSMSAfterID(ctx, cursor, 100)
 			if listErr != nil {
-				if listErr.Error() != lastError || time.Since(lastErrorAt) >= time.Minute {
-					s.logSMSNotificationError(channel, listErr)
-					lastError, lastErrorAt = listErr.Error(), time.Now()
+				errorText := notificationErrorText(listErr)
+				if errorText != lastError || time.Since(lastErrorAt) >= time.Minute {
+					s.logSMSNotificationError(channel, errorText)
+					lastError, lastErrorAt = errorText, time.Now()
 				}
 			} else {
 				for _, message := range messages {
 					notification := s.newSMSNotification(ctx, message)
 					if sendErr := sendSMSNotification(s.notificationDestinationContext(ctx), channel, config, notification); sendErr != nil {
-						if sendErr.Error() != lastError || time.Since(lastErrorAt) >= time.Minute {
-							s.logSMSNotificationError(channel, sendErr)
-							lastError, lastErrorAt = sendErr.Error(), time.Now()
+						errorText := notificationErrorText(sendErr, setting)
+						if errorText != lastError || time.Since(lastErrorAt) >= time.Minute {
+							s.logSMSNotificationError(channel, errorText)
+							lastError, lastErrorAt = errorText, time.Now()
 						}
 						break
 					}
@@ -123,22 +127,22 @@ func (s *Server) runSMSNotificationChannel(ctx context.Context, channel string) 
 	}
 }
 
-func (s *Server) smsNotificationConfig(ctx context.Context, channel string) (map[string]any, bool, error) {
+func (s *Server) smsNotificationConfig(ctx context.Context, channel string) (map[string]any, store.NotificationSetting, bool, error) {
 	setting, err := s.store.NotificationSetting(ctx, channel)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && !setting.Enabled) {
-		return nil, false, nil
+		return nil, setting, false, nil
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, setting, false, err
 	}
 	var config map[string]any
 	if err := json.Unmarshal(setting.Config, &config); err != nil {
-		return nil, false, fmt.Errorf("decode %s notification config: %w", channel, err)
+		return nil, setting, false, fmt.Errorf("decode %s notification config: %w", channel, err)
 	}
 	if err := validateSMSNotificationConfig(channel, config); err != nil {
-		return nil, false, err
+		return nil, setting, false, err
 	}
-	return config, true, nil
+	return config, setting, true, nil
 }
 
 func validateSMSNotificationConfig(channel string, config map[string]any) error {
@@ -186,9 +190,9 @@ func (s *Server) newSMSNotification(ctx context.Context, message store.SMSMessag
 	}
 }
 
-func (s *Server) logSMSNotificationError(channel string, err error) {
-	if err != nil && s.logger != nil {
-		s.logger.Warn("send inbound SMS notification", "channel", channel, "error", err)
+func (s *Server) logSMSNotificationError(channel string, errorText string) {
+	if errorText != "" && s.logger != nil {
+		s.logger.Warn("send inbound SMS notification", "channel", channel, "error", errorText)
 	}
 }
 

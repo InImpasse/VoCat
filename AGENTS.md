@@ -23,6 +23,7 @@
 - Production deployment requires the reviewed 40-hex commit and the `SHA256SUMS` index hash through a trusted out-of-band channel independent of artifact transfer. Never derive either expected value from the destination artifact directory.
 - Authenticate the complete artifact inventory and every file checksum before parsing JSON. The deployer must revalidate raw Gitleaks, npm audit, govulncheck, and SBOM evidence and bind the derived values to the exact schema 2 paths, toolchains, thresholds, and integrity scope.
 - VM validation must compare inactive and live libvirt state, keep installation media read-only and eject it after installation, and reject unexpected storage, network, PCI, or USB devices.
+- VM resource values must come from private local configuration and stay within the reviewed bounds enforced by creation and validation; never commit the actual host configuration.
 - `CAP_NET_ADMIN` and `CAP_NET_RAW` remain an explicit residual risk. Guest nftables is an ingress control, not a security boundary after a VoCat RCE; durable containment requires an external ACL or a future narrowly scoped privileged helper.
 
 ## Current Scope

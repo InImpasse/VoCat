@@ -3,7 +3,6 @@ set -Eeuo pipefail
 export LC_ALL=C
 
 readonly GIB=$((1024 * 1024 * 1024))
-readonly MIN_FREE_BYTES=$((120 * GIB))
 readonly OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.secboot.fd
 readonly OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.ms.fd
 
@@ -14,6 +13,9 @@ lan_interface=
 bulk_storage_root=
 iso_path=
 iso_sha256=
+vcpus=
+memory_mib=
+disk_size_gib=
 created_disk=0
 domain_was_absent=0
 disk_path=
@@ -27,9 +29,9 @@ usage() {
   cat <<'EOF'
 Usage: create-vocat-vm.sh [--check | --dry-run | --create] [options]
 
-Create or verify the fixed VoCat VM profile:
+Create or verify the constrained VoCat VM profile:
   Ubuntu Server 24.04, q35/KVM, UEFI Secure Boot, vTPM 2.0,
-  4 vCPU, 8 GiB RAM, 64 GiB thin qcow2, virtio-scsi/discard,
+  configurable resources within reviewed bounds, virtio-scsi/discard,
   libvirt default NAT plus an explicitly selected macvtap interface.
 
 Options:
@@ -40,6 +42,9 @@ Options:
                            non-SSD storage tree forbidden for VM disks
   --iso PATH              Ubuntu Server 24.04 amd64 ISO
   --iso-sha256 HEX        Expected SHA-256 from Ubuntu's signed checksum file
+  --vcpus COUNT           2-4 virtual CPUs (required)
+  --memory-mib MIB        2048-8192 MiB in 256 MiB increments (required)
+  --disk-size-gib GIB     24-64 GiB thin qcow2 size (required)
   -h, --help              Show this help
 
 --check verifies inactive and live domain state plus its qcow2. Pass --iso to
@@ -140,6 +145,21 @@ while (($#)); do
       iso_sha256=${2,,}
       shift 2
       ;;
+    --vcpus)
+      (($# >= 2)) || die '--vcpus requires a value'
+      vcpus=$2
+      shift 2
+      ;;
+    --memory-mib)
+      (($# >= 2)) || die '--memory-mib requires a value'
+      memory_mib=$2
+      shift 2
+      ;;
+    --disk-size-gib)
+      (($# >= 2)) || die '--disk-size-gib requires a value'
+      disk_size_gib=$2
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -154,6 +174,19 @@ done
 [[ -n $lan_interface ]] || die '--lan-interface is required'
 [[ $lan_interface =~ ^[A-Za-z0-9_.:-]{1,32}$ ]] || die 'invalid LAN interface name'
 [[ -n $bulk_storage_root && $bulk_storage_root == /* ]] || die '--bulk-storage-root must be an absolute path'
+[[ $vcpus =~ ^[0-9]{1,2}$ ]] || die '--vcpus must be an integer from 2 to 4'
+vcpus=$((10#$vcpus))
+((vcpus >= 2 && vcpus <= 4)) || die '--vcpus must be an integer from 2 to 4'
+[[ $memory_mib =~ ^[0-9]{1,5}$ ]] || die '--memory-mib must be an integer from 2048 to 8192 in 256 MiB increments'
+memory_mib=$((10#$memory_mib))
+((memory_mib >= 2048 && memory_mib <= 8192 && memory_mib % 256 == 0)) ||
+  die '--memory-mib must be an integer from 2048 to 8192 in 256 MiB increments'
+[[ $disk_size_gib =~ ^[0-9]{1,3}$ ]] || die '--disk-size-gib must be an integer from 24 to 64'
+disk_size_gib=$((10#$disk_size_gib))
+((disk_size_gib >= 24 && disk_size_gib <= 64)) || die '--disk-size-gib must be an integer from 24 to 64'
+min_free_gib=$((disk_size_gib * 2))
+((min_free_gib >= 48)) || min_free_gib=48
+min_free_bytes=$((min_free_gib * GIB))
 for command_name in df findmnt lsblk realpath stat; do
   command -v "$command_name" >/dev/null 2>&1 || die "required storage command is missing: $command_name"
 done
@@ -187,7 +220,8 @@ done
 if [[ $mode != check ]]; then
   free_bytes=$(df -B1 --output=avail "$storage_probe" | awk 'NR == 2 { print $1 }')
   [[ $free_bytes =~ ^[0-9]+$ ]] || die 'cannot determine free SSD space'
-  ((free_bytes >= MIN_FREE_BYTES)) || die 'at least 120 GiB free is required before creating the VM'
+  ((free_bytes >= min_free_bytes)) ||
+    die "at least $min_free_gib GiB free is required before creating this VM"
 fi
 
 if [[ -n $iso_path ]]; then
@@ -214,13 +248,15 @@ if [[ $mode == check ]]; then
   live_domain_xml=$(mktemp)
   virsh --connect qemu:///system dumpxml --inactive "$vm_name" >"$inactive_domain_xml"
   virsh --connect qemu:///system dumpxml "$vm_name" >"$live_domain_xml"
-  python3 - "$inactive_domain_xml" "$live_domain_xml" "$disk_path" "$lan_interface" "$OVMF_CODE" "$OVMF_VARS" "$iso_path" <<'PY'
+  python3 - "$inactive_domain_xml" "$live_domain_xml" "$disk_path" "$lan_interface" "$OVMF_CODE" "$OVMF_VARS" "$iso_path" "$vcpus" "$memory_mib" <<'PY'
 import os
 import stat
 import sys
 import xml.etree.ElementTree as ET
 
-inactive_xml_path, live_xml_path, disk_path, lan_interface, ovmf_code, ovmf_vars, expected_iso = sys.argv[1:]
+inactive_xml_path, live_xml_path, disk_path, lan_interface, ovmf_code, ovmf_vars, expected_iso, expected_vcpus, expected_memory_mib = sys.argv[1:]
+expected_vcpus = int(expected_vcpus)
+expected_memory_mib = int(expected_memory_mib)
 
 def require(condition, message):
     if not condition:
@@ -233,10 +269,12 @@ def validate(xml_path, scope):
         require(condition, f"{scope}: {message}")
 
     scoped_require(root.get("type") == "kvm", "domain type is not KVM")
-    scoped_require(root.findtext("vcpu", "").strip() == "4", "vCPU count is not 4")
+    scoped_require(root.findtext("vcpu", "").strip() == str(expected_vcpus),
+                   "vCPU count differs from the reviewed profile")
     memory = root.find("memory")
     scoped_require(memory is not None and memory.get("unit") == "KiB" and
-                   int(memory.text or 0) == 8 * 1024 * 1024, "memory is not exactly 8 GiB")
+                   int(memory.text or 0) == expected_memory_mib * 1024,
+                   "memory differs from the reviewed profile")
     cpu = root.find("cpu")
     scoped_require(cpu is not None and cpu.get("mode") == "host-passthrough",
                    "CPU mode is not host-passthrough")
@@ -404,14 +442,15 @@ PY
   qemu-img info --force-share --output=json "$disk_path" | python3 -c '
 import json, sys
 info = json.load(sys.stdin)
-if info.get("format") != "qcow2" or info.get("virtual-size") != 64 * 1024**3:
-    raise SystemExit("ERROR: disk is not a 64 GiB qcow2 image")
+expected_size = int(sys.argv[1]) * 1024**3
+if info.get("format") != "qcow2" or info.get("virtual-size") != expected_size:
+    raise SystemExit("ERROR: disk size differs from the reviewed profile")
 if any(info.get(key) for key in ("backing-filename", "full-backing-filename", "data-file")):
     raise SystemExit("ERROR: qcow2 backing or external data files are forbidden")
 format_data = info.get("format-specific", {}).get("data", {})
 if any(format_data.get(key) for key in ("backing-filename", "data-file", "data-file-raw")):
     raise SystemExit("ERROR: qcow2 backing or external data files are forbidden")
-'
+' "$disk_size_gib"
   virsh --connect qemu:///system dominfo "$vm_name" | grep -Eq '^Autostart:[[:space:]]+enable' || die 'domain autostart is not enabled'
   rm -f -- "$inactive_domain_xml" "$live_domain_xml"
   inactive_domain_xml=
@@ -459,7 +498,7 @@ else
   iso_path=$verified_iso_snapshot
 fi
 
-run qemu-img create -f qcow2 -o preallocation=metadata,lazy_refcounts=on "$disk_path" 64G
+run qemu-img create -f qcow2 -o preallocation=metadata,lazy_refcounts=on "$disk_path" "${disk_size_gib}G"
 [[ $mode == dry-run ]] || created_disk=1
 run chown libvirt-qemu:kvm "$disk_path"
 run chmod 0640 "$disk_path"
@@ -470,8 +509,8 @@ virt_install_args=(
   --machine q35
   --virt-type kvm
   --cpu host-passthrough
-  --vcpus 4
-  --memory 8192
+  --vcpus "$vcpus"
+  --memory "$memory_mib"
   --features smm=on
   --boot "loader=$OVMF_CODE,loader.readonly=yes,loader.type=pflash,loader.secure=yes,nvram.template=$OVMF_VARS"
   --tpm "backend.type=emulator,backend.version=2.0,model=tpm-crb"
@@ -496,8 +535,10 @@ if [[ $mode == dry-run ]]; then
   exit 0
 fi
 
-if ! "$0" --check --name "$vm_name" --disk-dir "$disk_dir" --lan-interface "$lan_interface" --iso "$iso_path"; then
-  die 'new domain failed fixed-profile validation and will be removed'
+if ! "$0" --check --name "$vm_name" --disk-dir "$disk_dir" --bulk-storage-root "$bulk_storage_root" \
+  --lan-interface "$lan_interface" --iso "$iso_path" --vcpus "$vcpus" \
+  --memory-mib "$memory_mib" --disk-size-gib "$disk_size_gib"; then
+  die 'new domain failed reviewed-profile validation and will be removed'
 fi
 created_disk=0
 domain_was_absent=0

@@ -364,7 +364,7 @@ func TestVMProfileRejectsStorageAndDeviceDrift(t *testing.T) {
 	freeSpaceCheck := strings.Index(script, "free_bytes=$(df")
 	checkModeBlock := strings.Index(script, "if [[ $mode != check ]]; then")
 	if checkModeBlock < 0 || freeSpaceCheck < checkModeBlock {
-		t.Fatal("120 GiB free-space gate is not restricted to VM creation")
+		t.Fatal("derived free-space gate is not restricted to VM creation")
 	}
 }
 
@@ -374,7 +374,7 @@ func TestVMProfilePythonValidatorRejectsLiveAndCDROMDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(scriptBytes)
-	startMarker := `  python3 - "$inactive_domain_xml" "$live_domain_xml" "$disk_path" "$lan_interface" "$OVMF_CODE" "$OVMF_VARS" "$iso_path" <<'PY'` + "\n"
+	startMarker := `  python3 - "$inactive_domain_xml" "$live_domain_xml" "$disk_path" "$lan_interface" "$OVMF_CODE" "$OVMF_VARS" "$iso_path" "$vcpus" "$memory_mib" <<'PY'` + "\n"
 	start := strings.Index(script, startMarker)
 	if start < 0 {
 		t.Fatal("cannot locate the VM profile Python validator")
@@ -417,6 +417,8 @@ func TestVMProfilePythonValidatorRejectsLiveAndCDROMDrift(t *testing.T) {
 	}{
 		{name: "valid installed profile", inactiveXML: inactive, liveXML: live, expectedISO: isoPath, wantSuccess: true},
 		{name: "valid ejected profile", inactiveXML: ejectedInactive, liveXML: ejectedLive, wantSuccess: true},
+		{name: "inactive vCPU drift", inactiveXML: strings.Replace(inactive, "<vcpu>2</vcpu>", "<vcpu>3</vcpu>", 1), liveXML: live, expectedISO: isoPath},
+		{name: "live memory drift", inactiveXML: inactive, liveXML: strings.Replace(live, "<memory unit=\"KiB\">2097152</memory>", "<memory unit=\"KiB\">3145728</memory>", 1), expectedISO: isoPath},
 		{name: "live-only PCI hostdev", inactiveXML: inactive, liveXML: addVMDevice(live, `<hostdev mode="subsystem" type="pci" managed="yes"><source><address domain="0" bus="0" slot="20" function="0"/></source></hostdev>`), expectedISO: isoPath},
 		{name: "live-only filesystem", inactiveXML: inactive, liveXML: addVMDevice(live, `<filesystem type="mount"><source dir="/"/><target dir="host"/></filesystem>`), expectedISO: isoPath},
 		{name: "live-only redirection", inactiveXML: inactive, liveXML: addVMDevice(live, `<redirdev bus="usb" type="spicevmc"/>`), expectedISO: isoPath},
@@ -454,7 +456,8 @@ func assertVMProfileValidator(t *testing.T, validatorPath, diskPath, inactiveXML
 		t.Fatal(err)
 	}
 	command := exec.Command("python3", validatorPath, inactivePath, livePath, diskPath, "testlan0",
-		"/usr/share/OVMF/OVMF_CODE_4M.secboot.fd", "/usr/share/OVMF/OVMF_VARS_4M.ms.fd", expectedISO)
+		"/usr/share/OVMF/OVMF_CODE_4M.secboot.fd", "/usr/share/OVMF/OVMF_VARS_4M.ms.fd", expectedISO,
+		"2", "2048")
 	output, err := command.CombinedOutput()
 	if wantSuccess && err != nil {
 		t.Fatalf("validator rejected trusted VM XML: %v\n%s", err, output)
@@ -474,8 +477,8 @@ func vmProfileXML(diskPath, isoPath string, inactive bool) string {
 		cdrom = fmt.Sprintf(`<disk type="file" device="cdrom"><driver name="qemu" type="raw"/><source file="%s"/><target dev="sda" bus="sata"/><readonly/></disk>`, isoPath)
 	}
 	return fmt.Sprintf(`<domain type="kvm">
-  <memory unit="KiB">8388608</memory>
-  <vcpu>4</vcpu>
+  <memory unit="KiB">2097152</memory>
+  <vcpu>2</vcpu>
   <cpu mode="host-passthrough"/>
   <os>
     <type machine="pc-q35-9.2">hvm</type>

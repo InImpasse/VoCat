@@ -26,7 +26,7 @@ lsblk -o NAME,TYPE,ROTA,SIZE,MOUNTPOINTS
 df -h / "$BULK_STORAGE_ROOT"
 ```
 
-创建 VM 前，SSD 必须至少有 120 GiB 可用空间。`create-vocat-vm.sh` 会解析实际物理后端，遇到旋转盘、私密提供的大容量存储根目录或不足 120 GiB 时直接停止。清理时只能删除已确认没有进程、挂载或 Git worktree 引用的旧临时文件，以及超过 14 天且没有使用者的 BuildKit 缓存。禁止运行 `docker system prune --volumes`。
+创建 VM 前，SSD 可用空间必须至少为虚拟磁盘的两倍且不得低于 48 GiB。`create-vocat-vm.sh` 会解析实际物理后端，遇到旋转盘、私密提供的大容量存储根目录或空间不足时直接停止。清理时只能删除已确认没有进程、挂载或 Git worktree 引用的旧临时文件，以及超过 14 天且没有使用者的 BuildKit 缓存。禁止运行 `docker system prune --volumes`。
 
 ### 检查意外安装的 LXD
 
@@ -70,19 +70,21 @@ sudo ./scripts/create-vocat-vm.sh --dry-run \
   --bulk-storage-root "$BULK_STORAGE_ROOT" \
   --lan-interface "$LAN_INTERFACE" \
   --iso "$ISO_PATH" \
-  --iso-sha256 <verified-sha256>
+  --iso-sha256 <verified-sha256> \
+  --vcpus 2 --memory-mib 2048 --disk-size-gib 24
 
 sudo ./scripts/create-vocat-vm.sh --create \
   --disk-dir /var/lib/libvirt/images/vocat \
   --bulk-storage-root "$BULK_STORAGE_ROOT" \
   --lan-interface "$LAN_INTERFACE" \
   --iso "$ISO_PATH" \
-  --iso-sha256 <verified-sha256>
+  --iso-sha256 <verified-sha256> \
+  --vcpus 2 --memory-mib 2048 --disk-size-gib 24
 ```
 
 `--create` 不会把大容量存储上的原始 ISO 直接交给 QEMU。它先把 ISO 复制到 SSD 的 root 管理目录，建立只对 root/libvirt 身份开放的 installer snapshot，检查普通文件、所有权、权限和单链接属性，再按 Ubuntu 签名校验文件中的预期 SHA-256 重新计算并核对副本，最后才调用 `virt-install`。创建失败且新域可安全撤销时会清理临时文件、snapshot 和新 qcow2；若域无法安全 undefine，则保留相关文件并要求人工恢复，避免删除仍被引用的数据。
 
-生成规格为 q35/KVM、UEFI Secure Boot、vTPM 2.0、4 vCPU、8 GiB 内存、64 GiB thin qcow2、virtio-scsi/discard。第一张 virtio 网卡连接 libvirt NAT，供宿主机管理；第二张通过 macvtap 直连私密提供的 LAN 接口。macvtap 默认不能让宿主直接访问来宾，因此 NAT 管理网必须保留。
+推荐的短信接收规格为 q35/KVM、UEFI Secure Boot、vTPM 2.0、2 vCPU、2 GiB 内存、24 GiB thin qcow2、virtio-scsi/discard。资源值来自私有配置，但脚本只接受 2–4 vCPU、2048–8192 MiB 内存和 24–64 GiB 磁盘。第一张 virtio 网卡连接 libvirt NAT，供宿主机管理；第二张通过 macvtap 直连私密提供的 LAN 接口。macvtap 默认不能让宿主直接访问来宾，因此 NAT 管理网必须保留。
 
 连接本地控制台：
 
@@ -94,18 +96,19 @@ virsh --connect qemu:///system console vocat
 
 SPICE 只监听宿主 loopback，不向 LAN 暴露。首次安装和每次宿主重启后的 LUKS 解锁优先使用本地 `virt-viewer`；确认来宾已配置串口控制台后，也可使用 `virsh console`。
 
-在 Ubuntu 安装器中选择使用整个 64 GiB 虚拟磁盘、建立 LVM，并启用 LUKS 加密。LUKS 密码只在安装器控制台输入，恢复密钥离线保存，不使用 cloud-init、命令参数或仓库文件传递。保留人工解锁：宿主重启时域会自动启动，但来宾在控制台输入 LUKS 密码前不会启动 VoCat。
+在 Ubuntu 安装器中选择 `Ubuntu Server (minimized)`，不安装 GUI、第三方驱动或额外 snap；使用整个 24 GiB 虚拟磁盘、建立 LVM，并启用 LUKS 加密。LUKS 密码只在安装器控制台输入，恢复密钥离线保存，不使用 cloud-init、命令参数或仓库文件传递。保留人工解锁：宿主重启时域会自动启动，但来宾在控制台输入 LUKS 密码前不会启动 VoCat。
 
-安装完成后确认两张网卡都获得地址，LAN DHCP 地址无冲突后再到路由器设置固定租约；不要把 MAC、租约或实际地址提交到仓库。随后验证固定配置。日常 `--check` 会针对 qcow2 文件的真实后端重新确认 SSD、所有权、权限、无 backing/external data file 以及受限的 libvirt 设备集合；120 GiB 空闲空间只作为创建前门槛：
+安装完成后确认两张网卡都获得地址，LAN DHCP 地址无冲突后再到路由器设置固定租约；不要把 MAC、租约或实际地址提交到仓库。随后验证固定配置。日常 `--check` 会针对 qcow2 文件的真实后端重新确认 SSD、所有权、权限、无 backing/external data file 以及受限的 libvirt 设备集合；派生的可用空间门槛只在创建前检查：
 
 ```bash
 sudo ./scripts/create-vocat-vm.sh --check \
   --disk-dir /var/lib/libvirt/images/vocat \
   --bulk-storage-root "$BULK_STORAGE_ROOT" \
-  --lan-interface "$LAN_INTERFACE"
+  --lan-interface "$LAN_INTERFACE" \
+  --vcpus 2 --memory-mib 2048 --disk-size-gib 24
 ```
 
-成功创建后，SSD 上已校验的 installer snapshot 会保留到系统安装完成并弹出介质，不能在 QEMU 仍引用它时手工删除。系统安装完成后必须从 inactive 与 live 域配置中弹出 ISO；保留的 CD-ROM 只能是只读 raw 设备且不得挂载介质。先用 `virsh domblklist vocat --details` 确认实际 CD-ROM target，再分别处理持久和运行中配置，最后不带 `--iso` 运行上述 `--check`。检查会同时拒绝 live/config 中残留或漂移的安装介质及未授权存储设备。确认 inactive/live 配置均已弹出且 `--check` 通过后，才可删除该 installer snapshot。
+成功创建后，SSD 上已校验的 installer snapshot 会保留到系统安装完成并弹出介质，不能在 QEMU 仍引用它时手工删除。系统安装完成后必须从 inactive 与 live 域配置中弹出 ISO；保留的 CD-ROM 只能是只读 raw 设备且不得挂载介质。先用 `virsh domblklist vocat --details` 确认实际 CD-ROM target，再分别处理持久和运行中配置，最后不带 `--iso`、但带相同资源参数运行上述 `--check`。检查会同时拒绝 live/config 中残留或漂移的安装介质及未授权存储设备。确认 inactive/live 配置均已弹出且 `--check` 通过后，才可删除该 installer snapshot。
 
 ## 4. 准备来宾并部署 VoCat
 

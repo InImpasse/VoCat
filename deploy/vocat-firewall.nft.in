@@ -1,0 +1,14 @@
+# This transaction replaces only VoCat's table. It deliberately leaves every
+# other nftables table unchanged.
+destroy table inet vocat_ingress
+
+table inet vocat_ingress {
+	chain input {
+		type filter hook input priority -5; policy accept;
+
+		iifname "lo" tcp dport 7575 accept comment "vocat-policy-v2-loopback"
+		iifname "tailscale0" tcp dport 7575 accept comment "vocat-policy-v2-tailscale"
+		ip saddr @LAN_CIDR@ fib saddr . iif oif exists tcp dport 7575 accept comment "vocat-policy-v2-lan-rpf"
+		tcp dport 7575 reject with tcp reset comment "vocat-policy-v2-default-reject"
+	}
+}

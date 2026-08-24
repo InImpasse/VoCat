@@ -1,0 +1,9 @@
+# This public VID/PID match only starts the verifier. The verifier reads the
+# root-only allowlist and requires the exact serial plus ID_PATH before it can
+# attach anything. Never put those production identifiers in this rule.
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="@VENDOR_ID@", ATTR{idProduct}=="@PRODUCT_ID@", TAG+="systemd", ENV{SYSTEMD_WANTS}+="vocat-usb-attach@%k.service"
+# USB remove events may no longer have readable sysfs attributes. PRODUCT is a
+# kernel uevent field; the detach handler still requires the recorded sysname.
+# SYSTEMD_WANTS is only acted on while a device becomes active, so removal uses
+# a short, non-blocking systemctl request and leaves the real work to a unit.
+ACTION=="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{PRODUCT}=="@VENDOR_ID@/@PRODUCT_ID@/*", RUN{program}+="/usr/bin/systemctl --no-block start vocat-usb-detach@%k.service"

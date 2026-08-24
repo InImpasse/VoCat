@@ -1,0 +1,27 @@
+[Unit]
+Description=Repair DJI 4G modem AT/QMI bindings for VoCat
+Documentation=file:///opt/vocat/current/docs/security-hardening.md
+After=systemd-udevd.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/vocat/current/vocat doctor --repair-dji-qmi
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=false
+ProtectSystem=strict
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=false
+ProtectKernelTunables=false
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+UMask=0077
+
+# Intentionally no install section. An administrator must start this unit
+# manually after verifying that exactly one 2ca3:4006 device is attached.

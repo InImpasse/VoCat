@@ -15,16 +15,19 @@
 
 <p align="center">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-amd64_%7C_386_%7C_arm64_%7C_aarch64_%7C_armv7-FCC624?style=flat-square&logo=linux&logoColor=111111">
-  <img alt="Docker" src="https://img.shields.io/badge/Docker-Multi--Arch-2496ED?style=flat-square&logo=docker&logoColor=white">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-Pinned_Build-2496ED?style=flat-square&logo=docker&logoColor=white">
   <img alt="WiFi Calling" src="https://img.shields.io/badge/WiFi_Calling-IMS_SMS-7B1FA2?style=flat-square">
   <img alt="eSIM" src="https://img.shields.io/badge/eSIM-LPA_%2F_eUICC-009688?style=flat-square">
   <img alt="Telegram" src="https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white">
-  <img alt="GitHub Actions" src="https://img.shields.io/badge/GitHub_Actions-Release-2088FF?style=flat-square&logo=githubactions&logoColor=white">
+  <img alt="Release" src="https://img.shields.io/badge/Release-Local_Artifact-2E7D32?style=flat-square">
 </p>
 
 [English](../README.md) | [العربية](README.ar.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | **Français** | [Русский](README.ru.md) | [Español](README.es.md) | [日本語](README.ja.md)
 
-Vocat est un panneau de contrôle web open-source et une boîte à outils d'ingénierie pour les modems cellulaires Quectel de classe EC20/EC25. Il réunit, dans un service autonome unique, la découverte de modems, l'état radio en direct, les terminaux AT et USSD, les SMS, la WiFi Calling, la gestion eSIM, la sélection de réseau, le routage par proxy, les notifications, les journaux d'audit et l'automatisation des versions.
+> [!IMPORTANT]
+> Fork renforcé : l'installation distante, les images upstream, les plugins, Export Proxy et l'auto-mise à jour à l'exécution sont désactivés ; les workflows de publication et Docker échouent en mode fermé. Compilez et déployez localement uniquement un SHA relu et commité selon [security-hardening.md](security-hardening.md) ; pour la production, suivez [vm-deployment.md](vm-deployment.md).
+
+Vocat est un panneau de contrôle web open-source et une boîte à outils d'ingénierie pour les modems cellulaires Quectel de classe EC20/EC25. Il réunit, dans un service autonome unique, la découverte de modems, l'état radio en direct, les terminaux AT et USSD, les SMS, la WiFi Calling, la gestion eSIM, la sélection de réseau, le routage par proxy, les notifications, les journaux d'audit et des processus contrôlés de compilation et de déploiement.
 
 Le backend est écrit en Go, l'interface est construite avec React et TypeScript, et le frontend de production est intégré dans le binaire Go. Un seul exécutable contient l'application web et utilise SQLite pour l'état persistant.
 
@@ -48,7 +51,7 @@ Le backend est écrit en Go, l'interface est construite avec React et TypeScript
 | Notifications | Transfert des nouveaux SMS entrants via Telegram, Bark, e-mail, Pushplus et webhooks signés. Chaque SMS est livré comme une notification individuelle. |
 | Bot Telegram | État de l'appareil, liste et commutation des profils installés, contrôles WiFi Calling et envoi de SMS. Les actions sensibles nécessitent une confirmation de l'administrateur. |
 | Exploitation | Authentification, protection CSRF, politiques d'accès, événements d'audit, journaux en direct, rétention des journaux, vérifications de santé, mise en page réactive, mode sombre et interface utilisateur en anglais/chinois. |
-| Distribution | Binaires Linux statiques, script d'installation systemd, auto-mise à jour avec vérification SHA-256, image Docker, publication GHCR et builds de version GitHub Actions. |
+| Distribution | Artefacts Linux statiques compilés localement depuis un SHA relu et commité dans des conteneurs temporaires épinglés, avec vérification du manifest et de SHA-256 et rollback de base de données. Compose est réservé au développement ; la publication automatique de binaires, de GHCR et de `latest` est désactivée. |
 
 ## Matériel pris en charge
 
@@ -63,134 +66,47 @@ Les fonctionnalités disponibles dépendent du firmware du module, de la composi
 
 ## Installation
 
-### Installation Linux en un clic
-
-En tant que root (y compris OpenWrt/Kwrt, où `sudo` est normalement absent) :
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | bash
-```
-
-Depuis un utilisateur normal sur une distribution disposant de sudo :
+L'installation distante est désactivée. Construisez le SHA exact, relu et commité,
+avec les images de conteneur épinglées, puis déployez le répertoire d'artefact
+complet. `scripts/install.sh` accepte uniquement un répertoire d'artefact local
+vérifié ; il ne télécharge ni version, ni URL, ni GitHub Release, ni image :
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | sudo bash
+scripts/build-hardened.sh amd64
+RELEASE_COMMIT="$(git rev-parse HEAD)"
+ARTIFACT_INDEX_SHA256='<hachage-SHA256SUMS-fiable-sur-64-hex>'
+sudo scripts/install.sh --check-env
+sudo scripts/install.sh --artifact "dist/hardened/$RELEASE_COMMIT" \
+  --expected-commit "$RELEASE_COMMIT" \
+  --expected-index-sha256 "$ARTIFACT_INDEX_SHA256"
 ```
 
-Vérifier les prérequis VoWiFi/XFRM de l'hôte sans installer VoCat :
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | bash -s -- --check-env
-```
-
-Installer une version spécifique :
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh -o install.sh
-sudo bash install.sh 0.0.2
-```
-
-VoWiFi IMS nécessite Linux XFRM/IPsec. Sur OpenWrt/Kwrt, le programme d'installation tente
-d'installer les paquets correspondants `ip-full`, `kmod-ipsec`, `kmod-ipsec4/6`,
-`kmod-crypto-authenc`, AES-CBC et SHA1 depuis le dépôt du firmware lui-même.
-Si des modules noyau correspondants ne sont pas disponibles, utilisez un firmware qui les inclut ;
-ne forcez jamais l'installation de kmods compilés pour un noyau différent.
-
-Le programme d'installation :
-
-- détecte `amd64`, `386`, `arm64`, `aarch64` ou `armv7` ;
-- télécharge le binaire GitHub Release correspondant ;
-- le vérifie par rapport à `SHA256SUMS` ;
-- installe Vocat sous `/opt/vocat` ;
-- crée un service systemd renforcé disposant des accès matériel et réseau requis par Vocat ;
-- stocke la configuration d'exécution dans `/etc/vocat/env` ;
-- génère un mot de passe administrateur initial aléatoire lors de la première installation.
-
-Après l'installation, ouvrez :
-
-```text
-http://<adresse-du-serveur>:7575
-```
-
-### Installation manuelle du binaire
-
-Téléchargez le binaire correspondant et `SHA256SUMS` depuis GitHub Releases :
-
-| Plateforme | Fichier de version |
-| --- | --- |
-| Linux x86-64 | `vocat-linux-amd64` |
-| Linux x86 32 bits | `vocat-linux-386` |
-| Linux ARM64 | `vocat-linux-arm64` |
-| Linux AArch64 | `vocat-linux-aarch64` |
-| Linux ARMv7 | `vocat-linux-armv7` |
-
-Vérifiez-le et installez-le :
-
-```bash
-sha256sum -c SHA256SUMS --ignore-missing
-sudo install -d -m 0755 /opt/vocat/bin /opt/vocat/data
-sudo install -m 0755 vocat-linux-amd64 /opt/vocat/bin/vocat
-read -rsp "Admin password: " VOCAT_BOOTSTRAP_PASSWORD; echo
-printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | sudo /opt/vocat/bin/vocat bootstrap-admin
-unset VOCAT_BOOTSTRAP_PASSWORD
-sudo env \
-  VOCAT_DATABASE_PATH=/opt/vocat/data/vocat.db \
-  /opt/vocat/bin/vocat serve
-```
-
-Cette commande manuelle exécute Vocat au premier plan. Utilisez `vocat serve` pour que le
-processus démarre directement le serveur ; exécuter `vocat` sans argument en tant que root
-sur un TTY ouvre plutôt le menu de gestion interactif. Utilisez le programme d'installation
-en un clic lorsqu'un service systemd géré et un redémarrage automatique sont requis.
+Consignez la valeur `artifact index sha256` produite par le compilateur via un
+canal fiable hors bande, indépendant du transfert de l'artefact. Ne calculez pas
+la valeur attendue depuis `SHA256SUMS` dans le répertoire copié. Le déploiement
+vérifie le commit et l'index attendus, le manifest, SHA-256 et la version de Go, teste la migration
+SQLite sur une copie, puis restaure ensemble le binaire et la base de données si
+readiness échoue. La production utilise la VM KVM dédiée et le service systemd
+décrits dans [vm-deployment.md](vm-deployment.md).
 
 ### Docker
 
-Pour un hôte Linux qui doit découvrir chaque modem Quectel pris en charge connecté et
-continuer à voir les événements de branchement à chaud USB, exécutez Vocat en mode d'accès matériel :
+Le profil Compose fourni est réservé au développement local. Il construit
+`vocat-hardened:local`, ne télécharge aucune image upstream, n'utilise pas le mode
+privilégié et ne monte pas l'arborescence `/dev` complète de l'hôte :
 
 ```bash
-docker pull ghcr.io/mengmengcode/vocat:latest
+docker compose build --pull=false
 
 read -rsp "Admin password: " VOCAT_BOOTSTRAP_PASSWORD; echo
-printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | docker run --rm -i \
-  --user 0:0 \
-  -v vocat-data:/opt/vocat/data \
-  --entrypoint /opt/vocat/bin/vocat \
-  ghcr.io/mengmengcode/vocat:latest bootstrap-admin
+printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | docker compose run --rm -T \
+  --entrypoint /opt/vocat/bin/vocat vocat bootstrap-admin
 unset VOCAT_BOOTSTRAP_PASSWORD
-
-docker run -d \
-  --name vocat \
-  --restart unless-stopped \
-  --network host \
-  --privileged \
-  --user 0:0 \
-  -v vocat-data:/opt/vocat/data \
-  -v /dev:/dev \
-  -v /sys:/sys:ro \
-  ghcr.io/mengmengcode/vocat:latest
+docker compose up -d
 ```
 
-Ouvrez `http://<adresse-du-serveur>:7575` après le démarrage du conteneur. Le réseau de l'hôte
-est requis pour que les interfaces réseau QMI restent visibles par Vocat, tandis que l'accès
-privilégié aux périphériques est requis pour les ports série, les nœuds de contrôle QMI, les
-interfaces TUN, la configuration réseau et les périphériques ajoutés après le démarrage du
-conteneur. Le montage bind de `/dev` rend les nouveaux nœuds `ttyUSB*`, `ttyACM*` et `cdc-wdm*`
-visibles sans recréer le conteneur.
-
-Ce mode donne intentionnellement à Vocat un large accès aux périphériques et à la pile réseau
-de l'hôte. Ne l'utilisez que sur un hôte Linux de confiance. La découverte automatique
-identifie actuellement les modems USB Quectel pris en charge (ID fabricant USB `2c7c`), et non
-des marques de modems arbitraires. Le mappage de nœuds individuels uniquement avec `--device`,
-comme `/dev/ttyUSB2` et `/dev/cdc-wdm0`, limite le conteneur à ces nœuds fixes et ne fournit
-pas une découverte multi-périphériques ou à chaud complète.
-
-L'image GHCR est publiée pour `linux/amd64` et `linux/arm64`.
-
-> [!TIP]
-> **Note de déploiement NAS / QNAP Container Station** :
-> Sur les systèmes NAS tels que QNAP QTS / QuTS hero (Container Station), les comptes administrateurs personnalisés et les mécanismes d'isolation de volumes peuvent faire en sorte que les volumes nommés Docker (ex. `-v vocat-data:/opt/vocat/data`) soient résolus vers des chemins isolés différents entre l'initialisation unique `bootstrap-admin` et le conteneur de service principal, entraînant des erreurs de mot de passe incorrect sur l'interface Web.
-> Pour les environnements NAS, il est fortement recommandé de remplacer les volumes nommés par un montage bind avec chemin absolu de l'hôte (ex. `-v /share/Container/vocat/data:/opt/vocat/data` sur QNAP) pour l'initialisation et l'exécution afin de garantir une persistance cohérente de la base de données SQLite.
+N'utilisez pas de conteneur privilégié et ne montez pas l'arborescence `/dev`
+complète en production.
 
 ## Configuration
 
@@ -204,8 +120,6 @@ Vocat lit un fichier de configuration JSON optionnel depuis `VOCAT_CONFIG`, puis
 | `VOCAT_SECURE_COOKIES` | `false` | Marque les cookies de session comme sécurisés lorsque HTTPS est utilisé. |
 | `VOCAT_SHUTDOWN_TIMEOUT` | `10s` | Délai d'arrêt gracieux. |
 | `VOCAT_MAX_REQUEST_BODY_BYTES` | `1048576` | Taille maximale du corps de requête API. |
-| `VOCAT_REPO` | `MengMengCode/VoCat` | Dépôt GitHub de confiance utilisé par l'auto-updater, au format `owner/name`. |
-| `GITHUB_TOKEN` | vide | Jeton GitHub optionnel pour les dépôts privés ou des limites d'API plus élevées. |
 
 Ne stockez pas de jetons Telegram, mots de passe SMTP, secrets de webhook, identifiants SIM ou autres données privées dans le dépôt. Configurez-les via les paramètres de l'application ou des fichiers d'environnement protégés.
 
@@ -225,27 +139,7 @@ La commutation de profil et l'envoi de SMS utilisent des boutons de confirmation
 
 ## Mise à jour
 
-Vérifier l'existence d'une GitHub Release plus récente :
-
-```bash
-vocat update --check --repo MengMengCode/VoCat
-```
-
-Installer la dernière version :
-
-```bash
-sudo vocat update --repo MengMengCode/VoCat
-```
-
-L'updater télécharge le binaire correspondant à l'architecture Linux actuelle, le vérifie avec le `SHA256SUMS` publié, remplace l'exécutable de manière atomique et redémarre le service systemd `vocat` lorsqu'il est disponible.
-
-Pour les installations Docker :
-
-```bash
-docker pull ghcr.io/mengmengcode/vocat:latest
-```
-
-Recréez le conteneur après avoir tiré la nouvelle image.
+La mise à jour automatique est désactivée. Examinez les changements upstream dans une branche d'intégration temporaire et ne déployez qu'un artefact local vérifié, compilé depuis un SHA relu et commité dans les conteneurs épinglés.
 
 ## Développement
 
@@ -278,23 +172,15 @@ Exécuter tous les tests :
 go test ./...
 ```
 
-Construire un binaire de production :
+Construire un binaire réservé au développement (ce n'est pas un artefact de publication) :
 
 ```bash
 go build -trimpath -ldflags "-s -w" -o vocat ./cmd/vocat
 ```
 
-## Automatisation des versions
+## Contrôles de publication
 
-Pousser un tag de version déclenche deux workflows GitHub Actions :
-
-- `release-binaries` construit et publie les binaires `amd64`, `386`, `arm64`, `aarch64` et `armv7` ainsi que `SHA256SUMS`.
-- `docker` construit et publie une image multi-architecture vers GitHub Container Registry.
-
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
+Les workflows GitHub Actions `release` et `docker` sont volontairement désactivés et échouent en mode fermé : ils ne publient ni binaires, ni images GHCR, ni tags `latest`. Un tag Git est uniquement une métadonnée du code source et ne déclenche aucun déploiement. Compilez localement les artefacts depuis un SHA relu et commité avec `scripts/build-hardened.sh` ; l'installeur accepte uniquement le répertoire d'artefact local vérifié.
 
 ## Structure du projet
 
@@ -304,11 +190,12 @@ internal/device/            Découverte de modems et contrôle des appareils
 internal/modem/             Session AT et gestion des réponses
 internal/server/            API HTTP, notifications et serveur web intégré
 internal/store/             Persistance SQLite
-internal/update/            Auto-updater GitHub Release
+internal/update/            Compatibilité désactivée ; aucun updater à l'exécution
 internal/vowifi/            Runtime IKE, EAP-AKA, IMS et WiFi Calling
-scripts/install.sh          Installeur et updater Linux
+scripts/build-hardened.sh   Compile un SHA commité dans des conteneurs épinglés
+scripts/install.sh          Installe uniquement l'artefact local vérifié ; aucun téléchargement
 web/src/                    Frontend React et TypeScript
-.github/workflows/          Automatisation des versions binaires et Docker
+.github/workflows/          Garde-fous fail-closed de publication et Docker
 ```
 
 ## Utilisation responsable

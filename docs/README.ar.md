@@ -15,16 +15,19 @@
 
 <p align="center">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-amd64_%7C_386_%7C_arm64_%7C_aarch64_%7C_armv7-FCC624?style=flat-square&logo=linux&logoColor=111111">
-  <img alt="Docker" src="https://img.shields.io/badge/Docker-Multi--Arch-2496ED?style=flat-square&logo=docker&logoColor=white">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-Pinned_Build-2496ED?style=flat-square&logo=docker&logoColor=white">
   <img alt="WiFi Calling" src="https://img.shields.io/badge/WiFi_Calling-IMS_SMS-7B1FA2?style=flat-square">
   <img alt="eSIM" src="https://img.shields.io/badge/eSIM-LPA_%2F_eUICC-009688?style=flat-square">
   <img alt="Telegram" src="https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white">
-  <img alt="GitHub Actions" src="https://img.shields.io/badge/GitHub_Actions-Release-2088FF?style=flat-square&logo=githubactions&logoColor=white">
+  <img alt="Release" src="https://img.shields.io/badge/Release-Local_Artifact-2E7D32?style=flat-square">
 </p>
 
 [English](../README.md) | **العربية** | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [Français](README.fr.md) | [Русский](README.ru.md) | [Español](README.es.md) | [日本語](README.ja.md)
 
-Vocat هي لوحة تحكم ويب مفتوحة المصدر ومجموعة أدوات هندسية لمودمات Quectel الخلوية من فئة EC20/EC25. تجمع في خدمة واحدة مكتفية ذاتيًا بين اكتشاف المودم، وحالة الراديو المباشرة، وطرفيات AT وUSSD، والرسائل القصيرة SMS، وWiFi Calling، وإدارة eSIM، واختيار الشبكة، والتوجيه عبر البروكسي، والإشعارات، وسجلات التدقيق، وأتمتة الإصدارات.
+> [!IMPORTANT]
+> الفرع المحصّن: التثبيت عن بُعد وصور upstream والإضافات وExport Proxy والتحديث الذاتي أثناء التشغيل معطّلة، كما أن مسارَي الإصدار وDocker مغلقان افتراضيًا (fail-closed). ابنِ وانشر محليًا فقط معرّف SHA خضع للمراجعة وتم إيداعه، وفق [security-hardening.md](security-hardening.md)؛ وللإنتاج اتبع [vm-deployment.md](vm-deployment.md).
+
+Vocat هي لوحة تحكم ويب مفتوحة المصدر ومجموعة أدوات هندسية لمودمات Quectel الخلوية من فئة EC20/EC25. تجمع في خدمة واحدة مكتفية ذاتيًا بين اكتشاف المودم، وحالة الراديو المباشرة، وطرفيات AT وUSSD، والرسائل القصيرة SMS، وWiFi Calling، وإدارة eSIM، واختيار الشبكة، والتوجيه عبر البروكسي، والإشعارات، وسجلات التدقيق، ومسارات البناء والنشر المنضبطة.
 
 الواجهة الخلفية مكتوبة بلغة Go، والواجهة مبنية باستخدام React وTypeScript، وتُضمَّن واجهة الإنتاج الأمامية داخل الملف الثنائي لـ Go. يحتوي ملف تنفيذي واحد على تطبيق الويب ويستخدم SQLite للحالة الدائمة.
 
@@ -48,7 +51,7 @@ Vocat هي لوحة تحكم ويب مفتوحة المصدر ومجموعة أ�
 | الإشعارات | إعادة توجيه الرسائل القصيرة الواردة الجديدة عبر Telegram وBark والبريد الإلكتروني وPushplus وwebhooks الموقّعة. يتم تسليم كل رسالة كإشعار منفصل. |
 | بوت Telegram | حالة الجهاز، قائمة الملفات الشخصية المثبتة وتبديلها، ضوابط WiFi Calling، وإرسال الرسائل القصيرة. تتطلب الإجراءات الحساسة تأكيد المسؤول. |
 | العمليات | المصادقة، الحماية من CSRF، سياسات الوصول، أحداث التدقيق، السجلات المباشرة، الاحتفاظ بالسجلات، فحوصات الصحة، تخطيط متجاوب، الوضع الداكن، وواجهة مستخدم بالإنجليزية/الصينية. |
-| التوزيع | ملفات Linux الثنائية الثابتة، سكربت تثبيت systemd، تحديث ذاتي مع التحقق من SHA-256، صورة Docker، النشر إلى GHCR، وبنى إصدارات GitHub Actions. |
+| التوزيع | آثار Linux ثابتة تُبنى محليًا من معرّف SHA مُراجَع ومودَع داخل حاويات مؤقتة مثبتة الإصدارات، مع التحقق من manifest وSHA-256 ودعم استرجاع قاعدة البيانات. Compose للتطوير فقط؛ ونشر الملفات الثنائية وGHCR ووسم `latest` آليًا معطّل. |
 
 ## الأجهزة المدعومة
 
@@ -63,132 +66,45 @@ Vocat هي لوحة تحكم ويب مفتوحة المصدر ومجموعة أ�
 
 ## التثبيت
 
-### تثبيت Linux بنقرة واحدة
-
-بصفتك root (بما في ذلك OpenWrt/Kwrt، حيث يكون `sudo` غير موجود عادةً):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | bash
-```
-
-من مستخدم عادي على توزيعة تحتوي على sudo:
+التثبيت عن بُعد معطّل. ابنِ معرّف SHA الدقيق بعد مراجعته وإيداعه باستخدام
+صور الحاويات المثبتة، ثم انشر دليل artifact الكامل. لا يقبل
+`scripts/install.sh` إلا دليل artifact محليًا تم التحقق منه؛ ولا ينزّل إصدارًا
+أو URL أو GitHub Release أو صورة حاوية:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | sudo bash
+scripts/build-hardened.sh amd64
+RELEASE_COMMIT="$(git rev-parse HEAD)"
+ARTIFACT_INDEX_SHA256='<trusted-64-hex-SHA256SUMS-hash>'
+sudo scripts/install.sh --check-env
+sudo scripts/install.sh --artifact "dist/hardened/$RELEASE_COMMIT" \
+  --expected-commit "$RELEASE_COMMIT" \
+  --expected-index-sha256 "$ARTIFACT_INDEX_SHA256"
 ```
 
-تحقق من متطلبات VoWiFi/XFRM على المضيف دون تثبيت VoCat:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | bash -s -- --check-env
-```
-
-تثبيت إصدار محدد:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh -o install.sh
-sudo bash install.sh 0.0.2
-```
-
-يتطلب VoWiFi IMS وجود Linux XFRM/IPsec. على OpenWrt/Kwrt يحاول المثبّت
-تثبيت الحزم المطابقة `ip-full` و`kmod-ipsec` و`kmod-ipsec4/6`
-و`kmod-crypto-authenc` وAES-CBC وSHA1 من مستودع البرنامج الثابت نفسه.
-إذا لم تكن وحدات النواة المطابقة متاحة، فاستخدم برنامجًا ثابتًا يتضمنها؛
-ولا تفرض أبدًا تثبيت kmods مبنية لنواة مختلفة.
-
-المثبّت:
-
-- يكتشف `amd64` أو `386` أو `arm64` أو `aarch64` أو `armv7`؛
-- ينزّل الملف الثنائي المطابق من GitHub Release؛
-- يتحقق منه مقابل `SHA256SUMS`؛
-- يثبّت Vocat في `/opt/vocat`؛
-- ينشئ خدمة systemd محصّنة بوصول الأجهزة والشبكة الذي يتطلبه Vocat؛
-- يخزّن إعدادات وقت التشغيل في `/etc/vocat/env`؛
-- يولّد كلمة مرور مسؤول أولية عشوائية عند التثبيت الأول.
-
-بعد التثبيت، افتح:
-
-```text
-http://<عنوان-الخادم>:7575
-```
-
-### التثبيت اليدوي للملف الثنائي
-
-نزّل الملف الثنائي المطابق و`SHA256SUMS` من GitHub Releases:
-
-| المنصة | ملف الإصدار |
-| --- | --- |
-| Linux x86-64 | `vocat-linux-amd64` |
-| Linux x86 32-بت | `vocat-linux-386` |
-| Linux ARM64 | `vocat-linux-arm64` |
-| Linux AArch64 | `vocat-linux-aarch64` |
-| Linux ARMv7 | `vocat-linux-armv7` |
-
-تحقق منه وثبّته:
-
-```bash
-sha256sum -c SHA256SUMS --ignore-missing
-sudo install -d -m 0755 /opt/vocat/bin /opt/vocat/data
-sudo install -m 0755 vocat-linux-amd64 /opt/vocat/bin/vocat
-read -rsp "Admin password: " VOCAT_BOOTSTRAP_PASSWORD; echo
-printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | sudo /opt/vocat/bin/vocat bootstrap-admin
-unset VOCAT_BOOTSTRAP_PASSWORD
-sudo env \
-  VOCAT_DATABASE_PATH=/opt/vocat/data/vocat.db \
-  /opt/vocat/bin/vocat serve
-```
-
-يشغّل هذا الأمر اليدوي Vocat في المقدمة. استخدم `vocat serve` حتى
-يبدأ العملية الخادم مباشرةً؛ إن تشغيل `vocat` دون وسائط بصفتك root
-على TTY يفتح بدلاً من ذلك قائمة الإدارة التفاعلية. استخدم المثبّت بنقرة
-واحدة عند الحاجة إلى خدمة systemd مُدارة وإعادة تشغيل تلقائية.
+سجّل قيمة `artifact index sha256` التي يطبعها مسار البناء عبر قناة موثوقة خارج
+النطاق ومستقلة عن نقل artifact. لا تستخرج القيمة المتوقعة من `SHA256SUMS` داخل
+الدليل المنسوخ. يتحقق مسار النشر من commit والفهرس المتوقعين ومن manifest وSHA-256 وإصدار Go، ويختبر ترحيل SQLite على
+نسخة، ويستعيد الملف الثنائي وقاعدة البيانات معًا إذا فشل فحص الجاهزية.
+يستخدم الإنتاج آلة KVM الافتراضية المخصصة وخدمة systemd الموضحة في
+[vm-deployment.md](vm-deployment.md).
 
 ### Docker
 
-لمضيف Linux الذي يجب أن يكتشف كل مودم Quectel مدعوم متصل ويواصل
-رؤية أحداث التوصيل الساخن لـ USB، شغّل Vocat في وضع الوصول إلى الأجهزة:
+ملف Compose الموجود في المستودع مخصص للتطوير المحلي فقط. يبني صورة
+`vocat-hardened:local` محليًا، ولا يسحب صورة من upstream، ولا يستخدم الوضع
+المميز، ولا يركب شجرة `/dev` الكاملة للمضيف:
 
 ```bash
-docker pull ghcr.io/mengmengcode/vocat:latest
+docker compose build --pull=false
 
 read -rsp "Admin password: " VOCAT_BOOTSTRAP_PASSWORD; echo
-printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | docker run --rm -i \
-  --user 0:0 \
-  -v vocat-data:/opt/vocat/data \
-  --entrypoint /opt/vocat/bin/vocat \
-  ghcr.io/mengmengcode/vocat:latest bootstrap-admin
+printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | docker compose run --rm -T \
+  --entrypoint /opt/vocat/bin/vocat vocat bootstrap-admin
 unset VOCAT_BOOTSTRAP_PASSWORD
-
-docker run -d \
-  --name vocat \
-  --restart unless-stopped \
-  --network host \
-  --privileged \
-  --user 0:0 \
-  -v vocat-data:/opt/vocat/data \
-  -v /dev:/dev \
-  -v /sys:/sys:ro \
-  ghcr.io/mengmengcode/vocat:latest
+docker compose up -d
 ```
 
-افتح `http://<عنوان-الخادم>:7575` بعد بدء الحاوية. شبكة المضيف
-مطلوبة حتى تبقى واجهات شبكة QMI مرئية لـ Vocat، بينما الوصول المميّز إلى الأجهزة
-مطلوب للمنافذ التسلسلية، وعقد تحكم QMI، وواجهات TUN، وإعدادات الشبكة، والأجهزة
-المضافة بعد بدء الحاوية. يجعل تركيب `/dev` العقد الجديدة `ttyUSB*` و`ttyACM*` و`cdc-wdm*`
-مرئية دون إعادة إنشاء الحاوية.
-
-يمنح هذا الوضع عمدًا Vocat وصولاً واسعًا إلى أجهزة المضيف ومكدس الشبكة.
-استخدمه فقط على مضيف Linux موثوق. يتعرف الاكتشاف التلقائي حاليًا على مودمات
-Quectel USB المدعومة (معرّف الشركة المصنعة USB `2c7c`)، وليس على ماركات مودم عشوائية.
-إن تركيب العقد الفردية فقط باستخدام `--device`، مثل `/dev/ttyUSB2` و`/dev/cdc-wdm0`،
-يحصر الحاوية في تلك العقد الثابتة ولا يوفر اكتشافًا كاملاً متعدد الأجهزة أو بالتوصيل الساخن.
-
-تُنشر صورة GHCR لـ `linux/amd64` و`linux/arm64`.
-
-> [!TIP]
-> **ملاحظة حول النشر على NAS / QNAP Container Station**:
-> في أنظمة NAS مثل QNAP QTS / QuTS hero (Container Station)، قد تؤدي حسابات المشرفين المخصصة وآليات عزل وحدات التخزين إلى توجيه وحدات تخزين Docker المسماة (مثل `-v vocat-data:/opt/vocat/data`) إلى مسارات معزولة مختلفة بين أمر التهيئة `bootstrap-admin` وحاوية الخدمة الرئيسية، مما يتسبب في ظهور خطأ في كلمة المرور عند تسجيل الدخول عبر الويب.
-> بالنسبة لبيئات NAS، يوصى بشدة باستبدال وحدات التخزين المسماة بربط مسار مطلق على المضيف (مثل `-v /share/Container/vocat/data:/opt/vocat/data` على QNAP) لكل من التهيئة والتشغيل لضمان استمرارية متسقة لقاعدة بيانات SQLite.
+لا تستخدم حاوية مميزة أو ربطًا كاملًا لـ `/dev` في الإنتاج.
 
 ## الإعدادات
 
@@ -202,8 +118,6 @@ Quectel USB المدعومة (معرّف الشركة المصنعة USB `2c7c`)
 | `VOCAT_SECURE_COOKIES` | `false` | يضع علامة آمنة على ملفات تعريف ارتباط الجلسة عند استخدام HTTPS. |
 | `VOCAT_SHUTDOWN_TIMEOUT` | `10s` | مهلة الإيقاف السلس. |
 | `VOCAT_MAX_REQUEST_BODY_BYTES` | `1048576` | الحد الأقصى لحجم جسم طلب API. |
-| `VOCAT_REPO` | `MengMengCode/VoCat` | مستودع GitHub الموثوق الذي يستخدمه المحدّث الذاتي، بصيغة `owner/name`. |
-| `GITHUB_TOKEN` | فارغ | رمز GitHub اختياري للمستودعات الخاصة أو حدود API أعلى. |
 
 لا تخزّن رموز Telegram، أو كلمات مرور SMTP، أو أسرار webhook، أو بيانات اعتماد SIM، أو بيانات خاصة أخرى في المستودع. قم بإعدادها عبر إعدادات التطبيق أو ملفات البيئة المحمية.
 
@@ -223,27 +137,7 @@ Quectel USB المدعومة (معرّف الشركة المصنعة USB `2c7c`)
 
 ## التحديث
 
-تحقق من وجود GitHub Release أحدث:
-
-```bash
-vocat update --check --repo MengMengCode/VoCat
-```
-
-ثبّت أحدث إصدار:
-
-```bash
-sudo vocat update --repo MengMengCode/VoCat
-```
-
-ينزّل المحدّث الملف الثنائي المطابق لبنية Linux الحالية، ويتحقق منه باستخدام `SHA256SUMS` المنشور، ويستبدل الملف التنفيذي بشكل ذري، ويعيد تشغيل خدمة systemd `vocat` عند توفرها.
-
-لتثبيتات Docker:
-
-```bash
-docker pull ghcr.io/mengmengcode/vocat:latest
-```
-
-أعد إنشاء الحاوية بعد سحب الصورة الجديدة.
+التحديث الذاتي أثناء التشغيل معطّل. راجع تغييرات upstream في فرع دمج مؤقت، ولا تنشر إلا artifact محليًا تم التحقق منه وبناؤه داخل الحاويات المثبتة من معرّف SHA مُراجَع ومودَع.
 
 ## التطوير
 
@@ -276,23 +170,15 @@ go run ./cmd/vocat
 go test ./...
 ```
 
-بناء ملف ثنائي للإنتاج:
+بناء ملف ثنائي للتطوير فقط (ليس artifact للإصدار):
 
 ```bash
 go build -trimpath -ldflags "-s -w" -o vocat ./cmd/vocat
 ```
 
-## أتمتة الإصدارات
+## ضوابط الإصدار
 
-يؤدي دفع وسم الإصدار إلى بدء سير عملَي GitHub Actions:
-
-- `release-binaries` يبني وينشر ملفات `amd64` و`386` و`arm64` و`aarch64` و`armv7` الثنائية مع `SHA256SUMS`.
-- `docker` يبني وينشر صورة متعددة البنى إلى GitHub Container Registry.
-
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
+مسارا `release` و`docker` في GitHub Actions معطّلان عمدًا ويعملان وفق fail-closed: لا ينشران ملفات ثنائية أو صور GHCR أو وسوم `latest`. وسم Git ليس إلا بيانات وصفية للمصدر ولا يشغّل النشر. ابنِ artifacts الإصدار محليًا من معرّف SHA مُراجَع ومودَع باستخدام `scripts/build-hardened.sh`، ولا تمرر إلى المثبّت إلا دليل artifact المحلي الذي تم التحقق منه.
 
 ## بنية المشروع
 
@@ -302,11 +188,12 @@ internal/device/            اكتشاف المودم والتحكم في الأ
 internal/modem/             جلسة AT ومعالجة الاستجابات
 internal/server/            واجهة HTTP API والإشعارات وخادم الويب المضمّن
 internal/store/             التخزين الدائم SQLite
-internal/update/            المحدّث الذاتي لـ GitHub Release
+internal/update/            كود توافق معطّل؛ لا يوجد محدّث أثناء التشغيل
 internal/vowifi/            بيئة تشغيل IKE وEAP-AKA وIMS وWiFi Calling
-scripts/install.sh          مثبّت ومحدّث Linux
+scripts/build-hardened.sh   بناء SHA مودَع داخل حاويات مثبتة الإصدارات
+scripts/install.sh          artifact محلي متحقق منه فقط؛ بلا تنزيل
 web/src/                    الواجهة الأمامية React وTypeScript
-.github/workflows/          أتمتة إصدارات الملفات الثنائية وDocker
+.github/workflows/          حواجز fail-closed للإصدار وDocker
 ```
 
 ## الاستخدام المسؤول

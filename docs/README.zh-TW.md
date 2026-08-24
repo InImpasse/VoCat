@@ -15,16 +15,19 @@
 
 <p align="center">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-amd64_%7C_386_%7C_arm64_%7C_aarch64_%7C_armv7-FCC624?style=flat-square&logo=linux&logoColor=111111">
-  <img alt="Docker" src="https://img.shields.io/badge/Docker-Multi--Arch-2496ED?style=flat-square&logo=docker&logoColor=white">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-Pinned_Build-2496ED?style=flat-square&logo=docker&logoColor=white">
   <img alt="WiFi Calling" src="https://img.shields.io/badge/WiFi_Calling-IMS_SMS-7B1FA2?style=flat-square">
   <img alt="eSIM" src="https://img.shields.io/badge/eSIM-LPA_%2F_eUICC-009688?style=flat-square">
   <img alt="Telegram" src="https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white">
-  <img alt="GitHub Actions" src="https://img.shields.io/badge/GitHub_Actions-Release-2088FF?style=flat-square&logo=githubactions&logoColor=white">
+  <img alt="Release" src="https://img.shields.io/badge/Release-Local_Artifact-2E7D32?style=flat-square">
 </p>
 
 [English](../README.md) | [العربية](README.ar.md) | [简体中文](README.zh-CN.md) | **繁體中文** | [Français](README.fr.md) | [Русский](README.ru.md) | [Español](README.es.md) | [日本語](README.ja.md)
 
-Vocat 是一款面向 Quectel EC20/EC25 系列行動通訊模組的開源 Web 控制面板與工程工具套件。它在單一自包含的服務中整合了模組探索、即時射頻狀態、AT 與 USSD 終端、簡訊、WiFi Calling(WiFi 通話)、eSIM 管理、網路選擇、代理路由、通知、稽核日誌以及發佈自動化。
+> [!IMPORTANT]
+> 加固分支已停用遠端安裝、上游映像、外掛、Export Proxy 與執行期自動更新；發佈與 Docker 工作流程採 fail-closed 策略。只可依照 [security-hardening.md](security-hardening.md) 從已審查且已提交的 SHA 在本機建置與部署；生產部署請遵循 [vm-deployment.md](vm-deployment.md)。
+
+Vocat 是一款面向 Quectel EC20/EC25 系列行動通訊模組的開源 Web 控制面板與工程工具套件。它在單一自包含的服務中整合了模組探索、即時射頻狀態、AT 與 USSD 終端、簡訊、WiFi Calling(WiFi 通話)、eSIM 管理、網路選擇、代理路由、通知、稽核日誌以及受控建置與部署流程。
 
 後端使用 Go 撰寫,介面採用 React 與 TypeScript 建構,生產環境前端被嵌入進 Go 二進位檔中。單一可執行檔即包含完整的 Web 應用,並使用 SQLite 進行持久化儲存。
 
@@ -48,7 +51,7 @@ Vocat 是一款面向 Quectel EC20/EC25 系列行動通訊模組的開源 Web �
 | 通知 | 透過 Telegram、Bark、電子郵件、Pushplus 以及簽章 Webhook 轉發新接收簡訊,每則簡訊個別推送。 |
 | Telegram 機器人 | 裝置狀態、已安裝設定檔列表與切換、WiFi Calling 控制以及簡訊傳送。敏感操作需要管理員確認。 |
 | 維運 | 驗證、CSRF 防護、存取策略、稽核事件、即時日誌、日誌保留、健康檢查、響應式版面、深色模式以及中英文應用介面。 |
-| 發佈 | 靜態 Linux 二進位檔、systemd 安裝腳本、具 SHA-256 校驗的自我更新、Docker 映像、GHCR 發佈以及 GitHub Actions 發佈建置。 |
+| 發佈 | 使用固定版本的臨時容器，從已審查且已提交的 SHA 在本機建置靜態 Linux 產物，並驗證清單與 SHA-256，支援資料庫感知回復。Compose 僅供開發；二進位檔、GHCR 與 `latest` 自動發佈均已停用。 |
 
 ## 支援的硬體
 
@@ -61,118 +64,21 @@ Vocat 面向基於高通晶片、並暴露相容 AT、QMI、序列埠與 USB 網
 
 可用功能取決於模組韌體、USB 複合裝置配置、SIM/eSIM 能力、主機驅動、無線網路以及電信業者配置。
 
-## 安裝
+## 加固安裝
 
-### Linux 一鍵安裝
-
-已是 root（包括預設沒有 `sudo` 的 OpenWrt/Kwrt）：
+遠端安裝已停用。請從已審查且已提交的 SHA 建置並部署完整產物目錄：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | bash
+scripts/build-hardened.sh amd64
+RELEASE_COMMIT="$(git rev-parse HEAD)"
+ARTIFACT_INDEX_SHA256='<由可信帶外管道取得的64位SHA256SUMS雜湊>'
+sudo scripts/install.sh --check-env
+sudo scripts/install.sh --artifact "dist/hardened/$RELEASE_COMMIT" \
+  --expected-commit "$RELEASE_COMMIT" \
+  --expected-index-sha256 "$ARTIFACT_INDEX_SHA256"
 ```
 
-一般 Linux 使用者且系統裝有 sudo：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | sudo bash
-```
-
-只檢查 VoWiFi/XFRM 環境，不安裝 VoCat：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | bash -s -- --check-env
-```
-
-安裝指定版本:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh -o install.sh
-sudo bash install.sh 0.0.2
-```
-
-VoWiFi IMS 必須使用 Linux XFRM/IPsec。OpenWrt/Kwrt 上安裝腳本會從目前韌體自己的軟體源嘗試安裝嚴格匹配的 `ip-full`、`kmod-ipsec`、`kmod-ipsec4/6`、`kmod-crypto-authenc`、AES-CBC 和 SHA1 元件。若軟體源沒有與目前核心匹配的模組,必須更換包含這些元件的韌體,禁止強裝其他核心版本的 kmod。
-
-安裝程式會:
-
-- 偵測 `amd64`、`386`、`arm64`、`aarch64` 或 `armv7` 架構;
-- 下載對應的 GitHub Release 二進位檔;
-- 對照 `SHA256SUMS` 進行校驗;
-- 將 Vocat 安裝到 `/opt/vocat`;
-- 建立具有 Vocat 所需硬體與網路存取權限的強化版 systemd 服務;
-- 將執行時配置存放在 `/etc/vocat/env`;
-- 首次安裝時產生隨機初始管理員密碼。
-
-安裝完成後開啟:
-
-```text
-http://<伺服器位址>:7575
-```
-
-### 手動二進位安裝
-
-從 GitHub Releases 下載對應的二進位檔與 `SHA256SUMS`:
-
-| 平台 | 發佈檔案 |
-| --- | --- |
-| Linux x86-64 | `vocat-linux-amd64` |
-| Linux x86 32 位元 | `vocat-linux-386` |
-| Linux ARM64 | `vocat-linux-arm64` |
-| Linux AArch64 | `vocat-linux-aarch64` |
-| Linux ARMv7 | `vocat-linux-armv7` |
-
-校驗並安裝:
-
-```bash
-sha256sum -c SHA256SUMS --ignore-missing
-sudo install -d -m 0755 /opt/vocat/bin /opt/vocat/data
-sudo install -m 0755 vocat-linux-amd64 /opt/vocat/bin/vocat
-read -rsp "管理員密碼: " VOCAT_BOOTSTRAP_PASSWORD; echo
-printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | sudo /opt/vocat/bin/vocat bootstrap-admin
-unset VOCAT_BOOTSTRAP_PASSWORD
-sudo env \
-  VOCAT_DATABASE_PATH=/opt/vocat/data/vocat.db \
-  /opt/vocat/bin/vocat serve
-```
-
-該手動指令會在前台執行 Vocat。請使用 `vocat serve` 以直接啟動伺服器；在 TTY 下以 root 執行無參數的 `vocat` 會進入互動式管理選單。如需託管的 systemd 服務與自動重新啟動,請使用一鍵安裝腳本。
-
-### Docker
-
-如果 Linux 主機需要探索每一個接入的受支援 Quectel 模組,並持續感知 USB 熱插拔事件,請以硬體存取模式執行 Vocat:
-
-```bash
-docker pull ghcr.io/mengmengcode/vocat:latest
-
-read -rsp "管理員密碼: " VOCAT_BOOTSTRAP_PASSWORD; echo
-printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | docker run --rm -i \
-  --user 0:0 \
-  -v vocat-data:/opt/vocat/data \
-  --entrypoint /opt/vocat/bin/vocat \
-  ghcr.io/mengmengcode/vocat:latest bootstrap-admin
-unset VOCAT_BOOTSTRAP_PASSWORD
-
-docker run -d \
-  --name vocat \
-  --restart unless-stopped \
-  --network host \
-  --privileged \
-  --user 0:0 \
-  -v vocat-data:/opt/vocat/data \
-  -v /dev:/dev \
-  -v /sys:/sys:ro \
-  ghcr.io/mengmengcode/vocat:latest
-```
-
-容器啟動後開啟 `http://<伺服器位址>:7575`。主機網路是必需的,這樣 QMI 網路介面才能對 Vocat 可見;而特權裝置存取是序列埠、QMI 控制節點、TUN 介面、網路配置以及容器啟動後新增裝置所必需的。`/dev` 掛載使新的 `ttyUSB*`、`ttyACM*` 和 `cdc-wdm*` 節點無需重建容器即可見。
-
-該模式有意賦予 Vocat 對主機裝置與網路堆疊的廣泛存取權限,僅在受信任的 Linux 主機上使用。自動探索目前僅識別受支援的 Quectel USB 模組(USB 廠商 ID `2c7c`),不識別任意品牌的模組。僅用 `--device` 映射單一節點(例如 `/dev/ttyUSB2` 與 `/dev/cdc-wdm0`)會將容器限定在這些固定節點上,無法提供完整的多裝置或熱插拔探索。
-
-GHCR 映像發佈為 `linux/amd64` 與 `linux/arm64`。
-
-> [!TIP]
-> **NAS / 威聯通 (QNAP Container Station) 部署說明**：
-> 在威聯通等 NAS 系統的 Container Station 下部署時，由於系統的非 Root 自訂管理員權限與磁碟區隔離機制，使用 Docker 具名磁碟區（如 `-v vocat-data:/opt/vocat/data`）在執行一次性初始化 `bootstrap-admin` 與啟動常駐服務時，兩者的磁碟區極易被解析至不同的隔離路徑，導致 Web 端登入時提示密碼錯誤。
-> 建議在 NAS 環境下部署時，將 `-v vocat-data:/opt/vocat/data` 替換為宿主機的絕對路徑掛載（例如威聯通上的 `-v /share/Container/vocat/data:/opt/vocat/data`），以確保初始化與執行期讀寫同一個 SQLite 資料庫檔案。
+建置器輸出的 `artifact index sha256` 必須透過獨立於產物傳輸的可信帶外管道記錄，不得從複製到目標機的產物目錄內重新計算預期值。`scripts/install.sh` 只接受本機已驗證的產物目錄，不會下載版本、URL、GitHub Release 或容器映像。生產環境使用獨立 KVM VM。Compose 僅供本機開發，不拉取上游映像、不使用 privileged mode，也不掛載完整 `/dev`。參見 [security-hardening.md](security-hardening.md)。
 
 ## 配置
 
@@ -186,8 +92,6 @@ Vocat 先從 `VOCAT_CONFIG` 讀取可選的 JSON 配置檔,再套用 `VOCAT_*` �
 | `VOCAT_SECURE_COOKIES` | `false` | 在使用 HTTPS 時將工作階段 Cookie 標記為安全。 |
 | `VOCAT_SHUTDOWN_TIMEOUT` | `10s` | 優雅關閉逾時時間。 |
 | `VOCAT_MAX_REQUEST_BODY_BYTES` | `1048576` | API 請求主體最大位元組數。 |
-| `VOCAT_REPO` | `MengMengCode/VoCat` | 自我更新器使用的受信任 GitHub 倉庫,格式為 `owner/name`。 |
-| `GITHUB_TOKEN` | 空 | 可選的 GitHub token,用於私有倉庫或更高的 API 限額。 |
 
 請勿將 Telegram token、SMTP 密碼、Webhook 金鑰、SIM 憑證或其他私密資料存放在倉庫中。請透過應用設定或受保護的環境檔來配置它們。
 
@@ -207,27 +111,7 @@ Vocat 先從 `VOCAT_CONFIG` 讀取可選的 JSON 配置檔,再套用 `VOCAT_*` �
 
 ## 更新
 
-檢查是否有更新的 GitHub Release:
-
-```bash
-vocat update --check --repo MengMengCode/VoCat
-```
-
-安裝最新發佈版:
-
-```bash
-sudo vocat update --repo MengMengCode/VoCat
-```
-
-更新器會下載與目前 Linux 架構匹配的二進位檔,使用已發佈的 `SHA256SUMS` 進行校驗,原子性地替換可執行檔,並在可用時重新啟動 `vocat` systemd 服務。
-
-Docker 安裝的更新方式:
-
-```bash
-docker pull ghcr.io/mengmengcode/vocat:latest
-```
-
-拉取新映像後重建容器。
+執行期自動更新已停用。請在臨時整合分支審查 upstream 變更，只部署由已審查且已提交的 SHA 在固定容器中建置並驗證的本機產物。
 
 ## 開發
 
@@ -260,23 +144,15 @@ go run ./cmd/vocat
 go test ./...
 ```
 
-建構生產二進位檔:
+建構僅供開發使用的二進位檔（不得作為發佈產物）：
 
 ```bash
 go build -trimpath -ldflags "-s -w" -o vocat ./cmd/vocat
 ```
 
-## 發佈自動化
+## 發佈控制
 
-推送版本標籤會觸發兩個 GitHub Actions 工作流程:
-
-- `release-binaries` 建構並發佈 `amd64`、`386`、`arm64`、`aarch64` 與 `armv7` 二進位檔及 `SHA256SUMS`。
-- `docker` 建構並向 GitHub Container Registry 發佈多架構映像。
-
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
+GitHub Actions 中的 `release` 與 `docker` 工作流程刻意採 fail-closed 策略：不會發佈二進位檔、GHCR 映像或 `latest` 標籤。Git 標籤僅是原始碼中繼資料，不會觸發部署。發佈產物必須使用 `scripts/build-hardened.sh` 從已審查且已提交的 SHA 在本機建置，安裝器只接受本機已驗證的產物目錄。
 
 ## 專案結構
 
@@ -286,11 +162,12 @@ internal/device/            模組探索與裝置控制
 internal/modem/             AT 工作階段與回應處理
 internal/server/            HTTP API、通知與內嵌 Web 伺服器
 internal/store/             SQLite 持久化
-internal/update/            GitHub Release 自我更新器
+internal/update/            已停用的相容占位程式碼；無執行期更新器
 internal/vowifi/            IKE、EAP-AKA、IMS 與 WiFi Calling 執行時
-scripts/install.sh          Linux 安裝與更新腳本
+scripts/build-hardened.sh   使用固定容器建置已提交 SHA
+scripts/install.sh          僅安裝本機已驗證產物；不下載
 web/src/                    React 與 TypeScript 前端
-.github/workflows/          二進位檔與 Docker 發佈自動化
+.github/workflows/          fail-closed 的發佈與 Docker 閘門
 ```
 
 ## 合規使用

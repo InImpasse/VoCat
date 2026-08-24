@@ -6,27 +6,34 @@ import (
 	"testing"
 )
 
-func TestInstallerValidatesDatabaseBeforeReplacingBinary(t *testing.T) {
+func TestInstallerUsesOnlyVerifiedLocalArtifacts(t *testing.T) {
 	scriptBytes, err := os.ReadFile("../../scripts/install.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	script := string(scriptBytes)
-	mainStart := strings.LastIndex(script, "# --- Main ")
-	if mainStart < 0 {
-		t.Fatal("installer main section not found")
+	for _, forbidden := range []string{
+		"releases/latest",
+		"GITHUB_TOKEN",
+		"MengMengCode/VoCat",
+		"ghcr.io/mengmengcode",
+		"curl -fsSL https://",
+	} {
+		if strings.Contains(script, forbidden) {
+			t.Errorf("installer contains forbidden remote update reference %q", forbidden)
+		}
 	}
-	main := script[mainStart:]
-	validateAt := strings.Index(main, `bootstrap_admin "${VOCAT_TMP}/vocat"`)
-	installAt := strings.Index(main, "install_binary")
-	if validateAt < 0 {
-		t.Fatal("installer does not validate the database with the downloaded binary")
-	}
-	if installAt < 0 {
-		t.Fatal("installer does not install the downloaded binary")
-	}
-	if validateAt > installAt {
-		t.Fatal("installer replaces the current binary before validating database compatibility")
+	for _, required := range []string{
+		"--artifact",
+		"--expected-commit",
+		"--expected-index-sha256",
+		"deploy-hardened.sh",
+		`exec "$deploy_script" --expected-commit "$4" --expected-index-sha256 "$6" "$2"`,
+		"remote installation and self-update are disabled",
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("installer is missing hardened artifact handling %q", required)
+		}
 	}
 }
 
@@ -37,23 +44,16 @@ func TestInstallerProvidesRequiredQMIUtilities(t *testing.T) {
 	}
 	script := string(scriptBytes)
 	for _, required := range []string{
-		"install_qmi_support()",
-		"command -v qmicli",
+		"curl ip jq qmicli sha256sum sqlite3 ss systemctl",
+		`command -v "$command"`,
 		"command -v qmi-proxy",
 		"/usr/libexec/qmi-proxy",
 		"/usr/lib/qmi-proxy",
-		"apt-get install -y libqmi-utils",
-		"dnf install -y libqmi-utils",
-		"pacman -Sy --noconfirm libqmi",
-		"apk add --no-cache qmi-utils",
-		"Could not install or find qmicli/qmi-proxy",
+		"ip xfrm state list",
+		"environment preflight failed",
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("installer is missing required QMI handling %q", required)
 		}
-	}
-	mainStart := strings.LastIndex(script, "# --- Main ")
-	if mainStart < 0 || !strings.Contains(script[mainStart:], "install_qmi_support") {
-		t.Error("installer does not install QMI utilities from its main path")
 	}
 }

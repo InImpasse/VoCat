@@ -15,16 +15,19 @@
 
 <p align="center">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-amd64_%7C_386_%7C_arm64_%7C_aarch64_%7C_armv7-FCC624?style=flat-square&logo=linux&logoColor=111111">
-  <img alt="Docker" src="https://img.shields.io/badge/Docker-Multi--Arch-2496ED?style=flat-square&logo=docker&logoColor=white">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-Pinned_Build-2496ED?style=flat-square&logo=docker&logoColor=white">
   <img alt="WiFi Calling" src="https://img.shields.io/badge/WiFi_Calling-IMS_SMS-7B1FA2?style=flat-square">
   <img alt="eSIM" src="https://img.shields.io/badge/eSIM-LPA_%2F_eUICC-009688?style=flat-square">
   <img alt="Telegram" src="https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white">
-  <img alt="GitHub Actions" src="https://img.shields.io/badge/GitHub_Actions-Release-2088FF?style=flat-square&logo=githubactions&logoColor=white">
+  <img alt="Release" src="https://img.shields.io/badge/Release-Local_Artifact-2E7D32?style=flat-square">
 </p>
 
 [English](../README.md) | [العربية](README.ar.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [Français](README.fr.md) | **Русский** | [Español](README.es.md) | [日本語](README.ja.md)
 
-Vocat — это веб-панель управления с открытым исходным кодом и набор инженерных инструментов для сотовых модемов Quectel класса EC20/EC25. Она объединяет в одном автономном сервисе обнаружение модемов, состояние радиосвязи в реальном времени, терминалы AT и USSD, SMS, WiFi Calling, управление eSIM, выбор сети, маршрутизацию через прокси, уведомления, журналы аудита и автоматизацию релизов.
+> [!IMPORTANT]
+> Защищённая ветка: удалённая установка, образы upstream, плагины, Export Proxy и самообновление во время работы отключены; workflows релиза и Docker намеренно работают по принципу fail-closed. Локально собирайте и развёртывайте только проверенный и зафиксированный SHA по [security-hardening.md](security-hardening.md); для production используйте [vm-deployment.md](vm-deployment.md).
+
+Vocat — это веб-панель управления с открытым исходным кодом и набор инженерных инструментов для сотовых модемов Quectel класса EC20/EC25. Она объединяет в одном автономном сервисе обнаружение модемов, состояние радиосвязи в реальном времени, терминалы AT и USSD, SMS, WiFi Calling, управление eSIM, выбор сети, маршрутизацию через прокси, уведомления, журналы аудита и контролируемые процессы сборки и развёртывания.
 
 Бэкенд написан на Go, интерфейс построен на React и TypeScript, а производственный фронтенд встроен в бинарный файл Go. Один исполняемый файл содержит веб-приложение и использует SQLite для постоянного хранения состояния.
 
@@ -48,7 +51,7 @@ Vocat — это веб-панель управления с открытым и
 | Уведомления | Пересылка новых входящих SMS через Telegram, Bark, электронную почту, Pushplus и подписанные вебхуки. Каждое SMS доставляется как отдельное уведомление. |
 | Telegram-бот | Статус устройства, список и переключение установленных профилей, управление WiFi Calling и отправка SMS. Чувствительные действия требуют подтверждения администратора. |
 | Эксплуатация | Аутентификация, защита CSRF, политики доступа, события аудита, журналы в реальном времени, хранение журналов, проверки работоспособности, адаптивная вёрстка, тёмный режим и интерфейс на английском/китайском. |
-| Дистрибуция | Статические бинарные файлы Linux, скрипт установки systemd, самообновление с проверкой SHA-256, образ Docker, публикация в GHCR и сборки релизов GitHub Actions. |
+| Дистрибуция | Локальные статические артефакты Linux, собранные из проверенного и зафиксированного SHA во временных закреплённых контейнерах, с проверкой манифеста и SHA-256 и откатом базы данных. Compose предназначен только для разработки; автоматическая публикация бинарных файлов, GHCR и `latest` отключена. |
 
 ## Поддерживаемое оборудование
 
@@ -63,133 +66,47 @@ Vocat ориентирован на модули Quectel на базе Qualcomm,
 
 ## Установка
 
-### Установка в Linux одной командой
-
-От имени root (включая OpenWrt/Kwrt, где `sudo` обычно отсутствует):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | bash
-```
-
-От обычного пользователя в дистрибутиве с sudo:
+Удалённая установка отключена. Соберите точный проверенный и зафиксированный SHA
+в закреплённых контейнерных образах и разверните полный каталог артефакта.
+`scripts/install.sh` принимает только проверенный локальный каталог артефакта;
+он не загружает версии, URL, GitHub Releases или образы контейнеров:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | sudo bash
+scripts/build-hardened.sh amd64
+RELEASE_COMMIT="$(git rev-parse HEAD)"
+ARTIFACT_INDEX_SHA256='<doverennyy-64-hex-hesh-SHA256SUMS>'
+sudo scripts/install.sh --check-env
+sudo scripts/install.sh --artifact "dist/hardened/$RELEASE_COMMIT" \
+  --expected-commit "$RELEASE_COMMIT" \
+  --expected-index-sha256 "$ARTIFACT_INDEX_SHA256"
 ```
 
-Проверить предварительные требования VoWiFi/XFRM на хосте без установки VoCat:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | bash -s -- --check-env
-```
-
-Установить конкретную версию:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh -o install.sh
-sudo bash install.sh 0.0.2
-```
-
-VoWiFi IMS требует Linux XFRM/IPsec. В OpenWrt/Kwrt установщик пытается
-установить соответствующие пакеты `ip-full`, `kmod-ipsec`, `kmod-ipsec4/6`,
-`kmod-crypto-authenc`, AES-CBC и SHA1 из собственного репозитория прошивки.
-Если соответствующие модули ядра недоступны, используйте прошивку, которая их включает;
-никогда не устанавливайте принудительно kmod, собранные для другого ядра.
-
-Установщик:
-
-- определяет `amd64`, `386`, `arm64`, `aarch64` или `armv7`;
-- загружает соответствующий бинарный файл GitHub Release;
-- проверяет его по `SHA256SUMS`;
-- устанавливает Vocat в `/opt/vocat`;
-- создаёт усиленный сервис systemd с доступом к оборудованию и сети, необходимым Vocat;
-- хранит конфигурацию времени выполнения в `/etc/vocat/env`;
-- генерирует случайный начальный пароль администратора при первой установке.
-
-После установки откройте:
-
-```text
-http://<адрес-сервера>:7575
-```
-
-### Ручная установка бинарного файла
-
-Загрузите соответствующий бинарный файл и `SHA256SUMS` из GitHub Releases:
-
-| Платформа | Файл релиза |
-| --- | --- |
-| Linux x86-64 | `vocat-linux-amd64` |
-| Linux x86 32-бит | `vocat-linux-386` |
-| Linux ARM64 | `vocat-linux-arm64` |
-| Linux AArch64 | `vocat-linux-aarch64` |
-| Linux ARMv7 | `vocat-linux-armv7` |
-
-Проверьте и установите его:
-
-```bash
-sha256sum -c SHA256SUMS --ignore-missing
-sudo install -d -m 0755 /opt/vocat/bin /opt/vocat/data
-sudo install -m 0755 vocat-linux-amd64 /opt/vocat/bin/vocat
-read -rsp "Admin password: " VOCAT_BOOTSTRAP_PASSWORD; echo
-printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | sudo /opt/vocat/bin/vocat bootstrap-admin
-unset VOCAT_BOOTSTRAP_PASSWORD
-sudo env \
-  VOCAT_DATABASE_PATH=/opt/vocat/data/vocat.db \
-  /opt/vocat/bin/vocat serve
-```
-
-Эта ручная команда запускает Vocat в переднем плане. Используйте `vocat serve`, чтобы
-процесс сразу запустил сервер; запуск `vocat` без аргументов от имени root
-в TTY вместо этого открывает интерактивное меню управления. Используйте установку
-одной командой, когда требуется управляемый сервис systemd и автоматический перезапуск.
+Значение `artifact index sha256`, выведенное сборщиком, необходимо получить по
+доверенному внешнему каналу, независимому от передачи артефакта. Нельзя вычислять
+ожидаемое значение из `SHA256SUMS` внутри скопированного каталога. Процесс проверяет
+ожидаемые commit и индекс, manifest, SHA-256 и версию Go, тестирует миграцию SQLite
+на копии и вместе восстанавливает бинарный файл и базу данных при ошибке
+readiness. В production используется отдельная KVM VM и systemd-служба из
+[vm-deployment.md](vm-deployment.md).
 
 ### Docker
 
-Для хоста Linux, который должен обнаруживать каждый подключённый поддерживаемый модем Quectel и
-продолжать видеть события горячего подключения USB, запустите Vocat в режиме доступа к оборудованию:
+Профиль Compose в репозитории предназначен только для локальной разработки. Он
+собирает `vocat-hardened:local`, не загружает upstream-образы, не использует
+привилегированный режим и не монтирует всё дерево `/dev` хоста:
 
 ```bash
-docker pull ghcr.io/mengmengcode/vocat:latest
+docker compose build --pull=false
 
 read -rsp "Admin password: " VOCAT_BOOTSTRAP_PASSWORD; echo
-printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | docker run --rm -i \
-  --user 0:0 \
-  -v vocat-data:/opt/vocat/data \
-  --entrypoint /opt/vocat/bin/vocat \
-  ghcr.io/mengmengcode/vocat:latest bootstrap-admin
+printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | docker compose run --rm -T \
+  --entrypoint /opt/vocat/bin/vocat vocat bootstrap-admin
 unset VOCAT_BOOTSTRAP_PASSWORD
-
-docker run -d \
-  --name vocat \
-  --restart unless-stopped \
-  --network host \
-  --privileged \
-  --user 0:0 \
-  -v vocat-data:/opt/vocat/data \
-  -v /dev:/dev \
-  -v /sys:/sys:ro \
-  ghcr.io/mengmengcode/vocat:latest
+docker compose up -d
 ```
 
-Откройте `http://<адрес-сервера>:7575` после запуска контейнера. Сеть хоста
-необходима, чтобы сетевые интерфейсы QMI оставались видимыми для Vocat, а привилегированный
-доступ к устройствам необходим для последовательных портов, узлов управления QMI, интерфейсов
-TUN, настройки сети и устройств, добавленных после запуска контейнера. Монтирование `/dev`
-делает новые узлы `ttyUSB*`, `ttyACM*` и `cdc-wdm*` видимыми без пересоздания контейнера.
-
-Этот режим намеренно предоставляет Vocat широкий доступ к устройствам и сетевому стеку
-хоста. Используйте его только на доверенном хосте Linux. Автоматическое обнаружение
-в настоящее время определяет поддерживаемые USB-модемы Quectel (USB vendor ID `2c7c`), а не
-произвольные марки модемов. Монтирование только отдельных узлов с помощью `--device`, таких как
-`/dev/ttyUSB2` и `/dev/cdc-wdm0`, ограничивает контейнер этими фиксированными узлами и не
-обеспечивает полное обнаружение нескольких устройств или горячего подключения.
-
-Образ GHCR публикуется для `linux/amd64` и `linux/arm64`.
-
-> [!TIP]
-> **Примечание по развертыванию на NAS / QNAP Container Station**:
-> В системах NAS, таких как QNAP QTS / QuTS hero (Container Station), из-за нестандартных прав администратора и механизмов изоляции томов именованные тома Docker (например, `-v vocat-data:/opt/vocat/data`) могут разрешаться в разные изолированные пути между выполнением команды `bootstrap-admin` и основным контейнером службы, что приводит к ошибкам неверного пароля при входе через веб-интерфейс.
-> Для сред NAS настоятельно рекомендуется использовать монтирование с абсолютным путем хоста (например, `-v /share/Container/vocat/data:/opt/vocat/data` на QNAP) как для инициализации, так и для запуска службы, чтобы гарантировать согласованность базы данных SQLite.
+Не используйте привилегированный контейнер и не монтируйте всё дерево `/dev`
+в production.
 
 ## Конфигурация
 
@@ -203,8 +120,6 @@ Vocat читает необязательный JSON-файл конфигура
 | `VOCAT_SECURE_COOKIES` | `false` | Помечает cookie сессии как безопасные при использовании HTTPS. |
 | `VOCAT_SHUTDOWN_TIMEOUT` | `10s` | Тайм-аут корректного завершения работы. |
 | `VOCAT_MAX_REQUEST_BODY_BYTES` | `1048576` | Максимальный размер тела запроса API. |
-| `VOCAT_REPO` | `MengMengCode/VoCat` | Доверенный репозиторий GitHub, используемый самообновлятором, в формате `owner/name`. |
-| `GITHUB_TOKEN` | пусто | Необязательный токен GitHub для приватных репозиториев или более высоких лимитов API. |
 
 Не храните токены Telegram, пароли SMTP, секреты вебхуков, учётные данные SIM или другие приватные данные в репозитории. Настраивайте их через параметры приложения или защищённые файлы окружения.
 
@@ -224,27 +139,7 @@ Vocat читает необязательный JSON-файл конфигура
 
 ## Обновление
 
-Проверить наличие более нового GitHub Release:
-
-```bash
-vocat update --check --repo MengMengCode/VoCat
-```
-
-Установить последний релиз:
-
-```bash
-sudo vocat update --repo MengMengCode/VoCat
-```
-
-Обновлятор загружает бинарный файл, соответствующий текущей архитектуре Linux, проверяет его по опубликованному `SHA256SUMS`, атомарно заменяет исполняемый файл и перезапускает сервис systemd `vocat`, когда он доступен.
-
-Для установок Docker:
-
-```bash
-docker pull ghcr.io/mengmengcode/vocat:latest
-```
-
-Пересоздайте контейнер после загрузки нового образа.
+Самообновление отключено. Проверяйте изменения upstream во временной интеграционной ветке и развёртывайте только проверенный локальный артефакт, собранный из проверенного и зафиксированного SHA в закреплённых контейнерах.
 
 ## Разработка
 
@@ -277,23 +172,15 @@ go run ./cmd/vocat
 go test ./...
 ```
 
-Собрать производственный бинарный файл:
+Собрать бинарный файл только для разработки (не релизный артефакт):
 
 ```bash
 go build -trimpath -ldflags "-s -w" -o vocat ./cmd/vocat
 ```
 
-## Автоматизация релизов
+## Контроль релизов
 
-Отправка тега версии запускает два рабочих процесса GitHub Actions:
-
-- `release-binaries` собирает и публикует бинарные файлы `amd64`, `386`, `arm64`, `aarch64` и `armv7` вместе с `SHA256SUMS`.
-- `docker` собирает и публикует мультиархитектурный образ в GitHub Container Registry.
-
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
+Workflows `release` и `docker` в GitHub Actions намеренно отключены и работают по принципу fail-closed: они не публикуют бинарные файлы, образы GHCR или теги `latest`. Git-тег является только метаданными исходного кода и не запускает развёртывание. Собирайте релизные артефакты локально из проверенного и зафиксированного SHA с помощью `scripts/build-hardened.sh`; установщик принимает только проверенный локальный каталог артефакта.
 
 ## Структура проекта
 
@@ -303,11 +190,12 @@ internal/device/            Обнаружение модемов и управ�
 internal/modem/             Сессия AT и обработка ответов
 internal/server/            HTTP API, уведомления и встроенный веб-сервер
 internal/store/             Постоянное хранение SQLite
-internal/update/            Самообновлятор GitHub Release
+internal/update/            Отключённый код совместимости; нет runtime updater
 internal/vowifi/            Среда выполнения IKE, EAP-AKA, IMS и WiFi Calling
-scripts/install.sh          Установщик и обновлятор Linux
+scripts/build-hardened.sh   Сборка зафиксированного SHA в закреплённых контейнерах
+scripts/install.sh          Только проверенный локальный артефакт; без загрузок
 web/src/                    Фронтенд на React и TypeScript
-.github/workflows/          Автоматизация релизов бинарных файлов и Docker
+.github/workflows/          Fail-closed ограничения релиза и Docker
 ```
 
 ## Ответственное использование

@@ -1,20 +1,26 @@
 [Unit]
 Description=vocat cellular and VoWiFi control service
-After=network-online.target
+After=network-online.target vocat-firewall.service
 Wants=network-online.target
+Requires=vocat-firewall.service
+ConditionFileIsExecutable=/opt/vocat/current/vocat
 
 [Service]
-Type=simple
-User=root
-Group=root
-WorkingDirectory=/opt/vocat
-ExecStart=/opt/vocat/bin/vocat
+Type=exec
+User=vocat
+Group=vocat
+SupplementaryGroups=vocat-modem
+WorkingDirectory=/var/lib/vocat
+ExecStart=/opt/vocat/current/vocat serve
 Restart=on-failure
 RestartSec=3s
 TimeoutStartSec=30s
-TimeoutStopSec=20s
-Environment=VOCAT_DATABASE_PATH=/opt/vocat/data/vocat.db
-EnvironmentFile=/etc/vocat/vocat.env
+TimeoutStopSec=40s
+RuntimeDirectory=vocat
+RuntimeDirectoryMode=0750
+Environment=VOCAT_DATABASE_PATH=/var/lib/vocat/vocat.db
+Environment=VOCAT_ADDR=0.0.0.0:7575
+UnsetEnvironment=GITHUB_TOKEN VOCAT_REPO
 
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
@@ -23,15 +29,20 @@ PrivateTmp=true
 PrivateDevices=false
 ProtectSystem=strict
 ProtectHome=true
+ProtectClock=true
+ProtectHostname=true
 ProtectKernelLogs=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
-ReadWritePaths=/opt/vocat/data
+ReadWritePaths=/var/lib/vocat /run/vocat
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
 RestrictRealtime=true
+RestrictSUIDSGID=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
+RemoveIPC=true
+SystemCallArchitectures=native
 UMask=0077
 LimitNOFILE=65536
 

@@ -1,66 +1,43 @@
-# VoCat Docker Compose deployment.
-#
-# First-time setup (password is read from stdin and stored only in SQLite):
-#   docker compose pull
-#   read -rsp "Admin password: " VOCAT_BOOTSTRAP_PASSWORD; echo
-#   printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | docker compose run --rm -T \
-#     --entrypoint /opt/vocat/bin/vocat vocat bootstrap-admin
-#   unset VOCAT_BOOTSTRAP_PASSWORD
-#   docker compose up -d
-#
-# Build locally from this repo instead of using the GHCR image:
-#   docker compose up -d --build
-#
-# In-container binary self-update is intentionally disabled (VOCAT_CONTAINER=docker
-# makes the server return 409 on the apply endpoint). Update by pulling a new
-# image and recreating the container:
-#   docker compose pull && docker compose up -d
+# Development-only local Compose profile. Production runs the verified binary
+# under deploy/vocat.service inside the dedicated VM.
 
 services:
   vocat:
-    # Use the prebuilt multi-arch image from GHCR. Override with
-    # --build to compile from the local Dockerfile instead.
-    image: ghcr.io/mengmengcode/vocat:latest
-    pull_policy: missing
+    image: vocat-hardened:local
+    pull_policy: never
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: vocat
+    container_name: vocat-hardened-local
     restart: unless-stopped
-
-    # Host network mode: the export-proxy plugin uses SO_BINDTODEVICE to pin
-    # outbound proxy traffic to the modem interface (wwan0) so roaming data
-    # egresses only the module — never the host's default route. That syscall
-    # needs the host network namespace visible inside the container, which
-    # network_mode: host provides directly. Port publishing is therefore
-    # meaningless (the container shares the host stack and vocat binds
-    # 0.0.0.0:7575 itself); proxy ports opened by the plugin are likewise
-    # reachable on the host IP without explicit mapping.
     network_mode: host
 
-    # Modem/QMI/USB-reader hot-plug uses dynamic character devices. Privileged
-    # mode mirrors the documented hardware-access docker run command and also
-    # supplies the raw-socket/netlink permissions needed by VoWiFi/IPsec.
-    privileged: true
-    user: "0:0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /run:size=16m,mode=0755
+      - /tmp:size=64m,mode=1777
 
     environment:
-      # Marks the process as containerized: the web UI then advertises
-      # "pull new image" instead of attempting an in-place binary update.
       VOCAT_CONTAINER: docker
-      # VOCAT_ADDR / VOCAT_DATABASE_PATH are set in the Dockerfile. Admin
-      # credentials are stored only in SQLite and are not process environment.
+      VOCAT_ADDR: 0.0.0.0:7575
+      VOCAT_DATABASE_PATH: /opt/vocat/data/vocat.db
 
     volumes:
-      # SQLite database + persistent state.
-      # Note for NAS (e.g. QNAP Container Station / Synology): replace named volume
-      # with a host absolute path (e.g. /share/Container/vocat/data:/opt/vocat/data)
-      # to avoid volume isolation issues between bootstrap-admin and runtime.
       - vocat-data:/opt/vocat/data
-      # Required for modem, MHI/WWAN and PC/SC USB-reader discovery, including
-      # devices added after the container starts.
-      - /dev:/dev
       - /sys:/sys:ro
+
+    # Add only reviewed, stable device nodes for local hardware testing. Never
+    # bind the host's entire /dev tree and never enable privileged mode.
+    # devices:
+    #   - /dev/ttyUSB2:/dev/ttyUSB2
+    #   - /dev/cdc-wdm0:/dev/cdc-wdm0
 
 volumes:
   vocat-data:

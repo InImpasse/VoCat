@@ -15,16 +15,19 @@
 
 <p align="center">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-amd64_%7C_386_%7C_arm64_%7C_aarch64_%7C_armv7-FCC624?style=flat-square&logo=linux&logoColor=111111">
-  <img alt="Docker" src="https://img.shields.io/badge/Docker-Multi--Arch-2496ED?style=flat-square&logo=docker&logoColor=white">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-Pinned_Build-2496ED?style=flat-square&logo=docker&logoColor=white">
   <img alt="WiFi Calling" src="https://img.shields.io/badge/WiFi_Calling-IMS_SMS-7B1FA2?style=flat-square">
   <img alt="eSIM" src="https://img.shields.io/badge/eSIM-LPA_%2F_eUICC-009688?style=flat-square">
   <img alt="Telegram" src="https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white">
-  <img alt="GitHub Actions" src="https://img.shields.io/badge/GitHub_Actions-Release-2088FF?style=flat-square&logo=githubactions&logoColor=white">
+  <img alt="Release" src="https://img.shields.io/badge/Release-Local_Artifact-2E7D32?style=flat-square">
 </p>
 
 [English](../README.md) | [العربية](README.ar.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [Français](README.fr.md) | [Русский](README.ru.md) | [Español](README.es.md) | **日本語**
 
-Vocat は、Quectel EC20/EC25 クラスのセルラーモデム向けのオープンソース Web コントロールパネル兼エンジニアリングツールキットです。モデムの検出、ライブの無線ステータス、AT / USSD ターミナル、SMS、WiFi Calling、eSIM 管理、ネットワーク選択、プロキシルーティング、通知、監査ログ、リリース自動化を、自己完結型の単一サービスに統合しています。
+> [!IMPORTANT]
+> 強化ブランチでは、リモートインストール、upstream イメージ、プラグイン、Export Proxy、実行時の自己更新を無効化し、リリースおよび Docker ワークフローを fail-closed にしています。[security-hardening.md](security-hardening.md) に従い、レビュー済みかつコミット済みの SHA だけをローカルでビルド、デプロイしてください。本番環境には [vm-deployment.md](vm-deployment.md) を使用します。
+
+Vocat は、Quectel EC20/EC25 クラスのセルラーモデム向けのオープンソース Web コントロールパネル兼エンジニアリングツールキットです。モデムの検出、ライブの無線ステータス、AT / USSD ターミナル、SMS、WiFi Calling、eSIM 管理、ネットワーク選択、プロキシルーティング、通知、監査ログ、管理されたビルドとデプロイの手順を、自己完結型の単一サービスに統合しています。
 
 バックエンドは Go で書かれ、インターフェースは React と TypeScript で構築され、本番フロントエンドは Go バイナリに埋め込まれています。単一の実行ファイルに Web アプリケーション全体が含まれ、永続的な状態には SQLite を使用します。
 
@@ -48,7 +51,7 @@ Vocat は、Quectel EC20/EC25 クラスのセルラーモデム向けのオー�
 | 通知 | Telegram、Bark、メール、Pushplus、署名付き Webhook を介した新着 SMS の転送。各 SMS は個別の通知として配信されます。 |
 | Telegram ボット | デバイスステータス、インストール済みプロファイルの一覧と切り替え、WiFi Calling 制御、SMS 送信。機密性の高い操作には管理者の確認が必要です。 |
 | 運用 | 認証、CSRF 保護、アクセスポリシー、監査イベント、ライブログ、ログ保持、ヘルスチェック、レスポンシブレイアウト、ダークモード、英語/中国語のアプリケーション UI。 |
-| 配布 | 静的 Linux バイナリ、systemd インストールスクリプト、SHA-256 検証付きの自己更新、Docker イメージ、GHCR 公開、GitHub Actions リリースビルド。 |
+| 配布 | 固定された一時コンテナ内で、レビュー済みかつコミット済みの SHA からローカルビルドする静的 Linux アーティファクト。manifest と SHA-256 の検証およびデータベースを含むロールバックに対応します。Compose は開発専用で、バイナリ、GHCR、`latest` の自動公開は無効です。 |
 
 ## 対応ハードウェア
 
@@ -61,118 +64,21 @@ Vocat は、互換性のある AT、QMI、シリアル、USB ネットワーク�
 
 利用可能な機能は、モジュールのファームウェア、USB 構成、SIM/eSIM の機能、ホストドライバー、無線ネットワーク、キャリア設定によって異なります。
 
-## インストール
+## 強化されたインストール
 
-### ワンクリック Linux インストール
-
-root として(`sudo` が通常存在しない OpenWrt/Kwrt を含む):
+リモートインストールは無効です。レビュー済みかつコミット済みの SHA から完全なアーティファクトディレクトリをビルドしてデプロイします。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | bash
+scripts/build-hardened.sh amd64
+RELEASE_COMMIT="$(git rev-parse HEAD)"
+ARTIFACT_INDEX_SHA256='<trusted-64-hex-SHA256SUMS-hash>'
+sudo scripts/install.sh --check-env
+sudo scripts/install.sh --artifact "dist/hardened/$RELEASE_COMMIT" \
+  --expected-commit "$RELEASE_COMMIT" \
+  --expected-index-sha256 "$ARTIFACT_INDEX_SHA256"
 ```
 
-sudo を持つディストリビューションの一般ユーザーから:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | sudo bash
-```
-
-VoCat をインストールせずに、ホストの VoWiFi/XFRM 前提条件を確認する:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh | bash -s -- --check-env
-```
-
-特定のバージョンをインストールする:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MengMengCode/VoCat/master/scripts/install.sh -o install.sh
-sudo bash install.sh 0.0.2
-```
-
-VoWiFi IMS には Linux XFRM/IPsec が必要です。OpenWrt/Kwrt では、インストーラーはファームウェア自身のフィードから、一致する `ip-full`、`kmod-ipsec`、`kmod-ipsec4/6`、`kmod-crypto-authenc`、AES-CBC、SHA1 パッケージのインストールを試みます。一致するカーネルモジュールが利用できない場合は、それらを含むファームウェアを使用してください。別のカーネル向けにビルドされた kmod を強制的にインストールしてはいけません。
-
-インストーラーは次を行います:
-
-- `amd64`、`386`、`arm64`、`aarch64`、`armv7` を検出します;
-- 一致する GitHub Release バイナリをダウンロードします;
-- `SHA256SUMS` と照合して検証します;
-- Vocat を `/opt/vocat` にインストールします;
-- Vocat が必要とするハードウェアおよびネットワークアクセスを持つ強化された systemd サービスを作成します;
-- 実行時設定を `/etc/vocat/env` に保存します;
-- 初回インストール時にランダムな初期管理者パスワードを生成します。
-
-インストール後、次を開きます:
-
-```text
-http://<サーバーアドレス>:7575
-```
-
-### 手動バイナリインストール
-
-一致するバイナリと `SHA256SUMS` を GitHub Releases からダウンロードします:
-
-| プラットフォーム | リリースファイル |
-| --- | --- |
-| Linux x86-64 | `vocat-linux-amd64` |
-| Linux x86 32 ビット | `vocat-linux-386` |
-| Linux ARM64 | `vocat-linux-arm64` |
-| Linux AArch64 | `vocat-linux-aarch64` |
-| Linux ARMv7 | `vocat-linux-armv7` |
-
-検証してインストールします:
-
-```bash
-sha256sum -c SHA256SUMS --ignore-missing
-sudo install -d -m 0755 /opt/vocat/bin /opt/vocat/data
-sudo install -m 0755 vocat-linux-amd64 /opt/vocat/bin/vocat
-read -rsp "Admin password: " VOCAT_BOOTSTRAP_PASSWORD; echo
-printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | sudo /opt/vocat/bin/vocat bootstrap-admin
-unset VOCAT_BOOTSTRAP_PASSWORD
-sudo env \
-  VOCAT_DATABASE_PATH=/opt/vocat/data/vocat.db \
-  /opt/vocat/bin/vocat serve
-```
-
-この手動コマンドは Vocat をフォアグラウンドで実行します。プロセスがサーバーを直接起動するように `vocat serve` を使用してください。TTY で root として引数なしで `vocat` を実行すると、代わりに対話型管理メニューが開きます。管理対象の systemd サービスと自動再起動が必要な場合は、ワンクリックインストーラーを使用してください。
-
-### Docker
-
-接続されているすべてのサポート対象 Quectel モデムを検出し、USB ホットプラグイベントを継続的に認識する必要がある Linux ホストでは、Vocat をハードウェアアクセスモードで実行します:
-
-```bash
-docker pull ghcr.io/mengmengcode/vocat:latest
-
-read -rsp "Admin password: " VOCAT_BOOTSTRAP_PASSWORD; echo
-printf '%s\n' "$VOCAT_BOOTSTRAP_PASSWORD" | docker run --rm -i \
-  --user 0:0 \
-  -v vocat-data:/opt/vocat/data \
-  --entrypoint /opt/vocat/bin/vocat \
-  ghcr.io/mengmengcode/vocat:latest bootstrap-admin
-unset VOCAT_BOOTSTRAP_PASSWORD
-
-docker run -d \
-  --name vocat \
-  --restart unless-stopped \
-  --network host \
-  --privileged \
-  --user 0:0 \
-  -v vocat-data:/opt/vocat/data \
-  -v /dev:/dev \
-  -v /sys:/sys:ro \
-  ghcr.io/mengmengcode/vocat:latest
-```
-
-コンテナの起動後に `http://<サーバーアドレス>:7575` を開きます。QMI ネットワークインターフェースが Vocat から見えるようにするにはホストネットワークが必要であり、シリアルポート、QMI 制御ノード、TUN インターフェース、ネットワーク設定、コンテナ起動後に追加されたデバイスには特権デバイスアクセスが必要です。`/dev` バインドマウントにより、コンテナを再作成せずに新しい `ttyUSB*`、`ttyACM*`、`cdc-wdm*` ノードが見えるようになります。
-
-このモードは意図的に Vocat にホストのデバイスとネットワークスタックへの広範なアクセスを付与します。信頼できる Linux ホストでのみ使用してください。自動検出は現在、サポート対象の Quectel USB モデム(USB ベンダー ID `2c7c`)のみを識別し、任意のモデムブランドは識別しません。`--device` で `/dev/ttyUSB2` や `/dev/cdc-wdm0` などの個別ノードのみをマッピングすると、コンテナはそれらの固定ノードに限定され、完全なマルチデバイスまたはホットプラグ検出は提供されません。
-
-GHCR イメージは `linux/amd64` と `linux/arm64` 向けに公開されています。
-
-> [!TIP]
-> **NAS / QNAP Container Station デプロイ時の注意点**:
-> QNAP QTS / QuTS hero (Container Station) などの NAS 環境では、非 root カスタム管理者権限とボリューム分離メカニズムにより、Docker の名前付きボリューム（例: `-v vocat-data:/opt/vocat/data`）を使用すると、初回の `bootstrap-admin` 初期化時とデーモン起動時で異なる隔離パスに書き込まれ、Web ログイン時にパスワードエラーとなる場合があります。
-> NAS 環境では、初期化と常駐コンテナの両方で名前付きボリュームの代わりにホストの絶対パスバインドマウント（例: QNAP の `-v /share/Container/vocat/data:/opt/vocat/data`）を使用することを推奨します。
+ビルダーが出力する `artifact index sha256` は、アーティファクト転送とは独立した信頼できる帯域外チャネルで記録してください。コピー先のアーティファクトディレクトリにある `SHA256SUMS` から期待値を算出してはいけません。`scripts/install.sh` が受け付けるのは検証済みのローカルアーティファクトディレクトリだけで、バージョン、URL、GitHub Release、コンテナイメージはダウンロードしません。本番環境では専用 KVM ゲストを使用します。Compose はローカル開発専用で、upstream イメージの取得、privileged mode、ホストの `/dev` 全体のマウントを行いません。詳細は [security-hardening.md](security-hardening.md) を参照してください。
 
 ## 設定
 
@@ -186,8 +92,6 @@ Vocat は `VOCAT_CONFIG` からオプションの JSON 設定ファイルを読�
 | `VOCAT_SECURE_COOKIES` | `false` | HTTPS 使用時にセッション Cookie をセキュアとしてマークします。 |
 | `VOCAT_SHUTDOWN_TIMEOUT` | `10s` | グレースフルシャットダウンのタイムアウト。 |
 | `VOCAT_MAX_REQUEST_BODY_BYTES` | `1048576` | API リクエストボディの最大サイズ。 |
-| `VOCAT_REPO` | `MengMengCode/VoCat` | 自己更新機能が使用する信頼された GitHub リポジトリ(`owner/name` 形式)。 |
-| `GITHUB_TOKEN` | 空 | プライベートリポジトリやより高い API レート制限のためのオプションの GitHub トークン。 |
 
 Telegram トークン、SMTP パスワード、Webhook シークレット、SIM 認証情報、その他のプライベートデータをリポジトリに保存しないでください。アプリケーション設定または保護された環境ファイルを通じて設定してください。
 
@@ -207,27 +111,7 @@ Telegram 通知が有効で、Chat ID と Admin ID の両方が設定されて�
 
 ## 更新
 
-より新しい GitHub Release を確認する:
-
-```bash
-vocat update --check --repo MengMengCode/VoCat
-```
-
-最新リリースをインストールする:
-
-```bash
-sudo vocat update --repo MengMengCode/VoCat
-```
-
-アップデーターは、現在の Linux アーキテクチャに一致するバイナリをダウンロードし、公開された `SHA256SUMS` で検証し、実行ファイルをアトミックに置き換え、利用可能な場合は `vocat` systemd サービスを再起動します。
-
-Docker インストールの場合:
-
-```bash
-docker pull ghcr.io/mengmengcode/vocat:latest
-```
-
-新しいイメージをプルした後、コンテナを再作成します。
+実行時の自己更新は無効です。一時的な統合ブランチで upstream の変更をレビューし、レビュー済みかつコミット済みの SHA を固定コンテナでビルドした、検証済みローカルアーティファクトだけをデプロイしてください。
 
 ## 開発
 
@@ -260,23 +144,15 @@ go run ./cmd/vocat
 go test ./...
 ```
 
-本番バイナリをビルドする:
+開発専用バイナリをビルドする（リリースアーティファクトには使用不可）:
 
 ```bash
 go build -trimpath -ldflags "-s -w" -o vocat ./cmd/vocat
 ```
 
-## リリース自動化
+## リリース制御
 
-バージョンタグをプッシュすると、2 つの GitHub Actions ワークフローが開始されます:
-
-- `release-binaries` は `amd64`、`386`、`arm64`、`aarch64`、`armv7` バイナリと `SHA256SUMS` をビルドして公開します。
-- `docker` はマルチアーキテクチャイメージをビルドして GitHub Container Registry に公開します。
-
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
+GitHub Actions の `release` と `docker` ワークフローは意図的に無効化され、fail-closed です。バイナリ、GHCR イメージ、`latest` タグを公開しません。Git タグはソースのメタデータにすぎず、デプロイのトリガーにはなりません。リリースアーティファクトは `scripts/build-hardened.sh` を使ってレビュー済みかつコミット済みの SHA からローカルでビルドし、インストーラーには検証済みローカルアーティファクトディレクトリだけを渡してください。
 
 ## プロジェクト構成
 
@@ -286,11 +162,12 @@ internal/device/            モデム検出とデバイス制御
 internal/modem/             AT セッションと応答処理
 internal/server/            HTTP API、通知、埋め込み Web サーバー
 internal/store/             SQLite 永続化
-internal/update/            GitHub Release 自己更新機能
+internal/update/            無効化済み互換コード。実行時 updater なし
 internal/vowifi/            IKE、EAP-AKA、IMS、WiFi Calling ランタイム
-scripts/install.sh          Linux インストーラーとアップデーター
+scripts/build-hardened.sh   固定コンテナでコミット済み SHA をビルド
+scripts/install.sh          検証済みローカルアーティファクト専用。ダウンロードなし
 web/src/                    React と TypeScript のフロントエンド
-.github/workflows/          バイナリと Docker のリリース自動化
+.github/workflows/          fail-closed のリリースおよび Docker ガード
 ```
 
 ## 責任ある使用

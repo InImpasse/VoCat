@@ -1,0 +1,67 @@
+name: security-candidate
+
+on:
+  push:
+    branches:
+      - security-hardening
+      - "merge/upstream-*"
+  pull_request:
+    branches:
+      - security-hardening
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-candidate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-scan:
+    name: Build and scan linux/amd64 candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      VOCAT_BUILD_CACHE_ROOT: ${{ runner.temp }}/vocat-cache
+
+    steps:
+      - name: Check out the candidate commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Verify checked-out commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+
+      - name: Build and verify candidate
+        shell: bash
+        run: scripts/build-hardened.sh amd64
+
+      - name: Upload candidate evidence
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vocat-security-candidate-${{ github.sha }}-linux-amd64
+          path: dist/hardened/${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: false
+
+      - name: Summarize candidate
+        shell: bash
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: |
+          {
+            echo "### Security candidate"
+            echo
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Platform: \`linux/amd64\`"
+            echo "- Retention: 7 days"
+            echo "- Upload digest: \`${ARTIFACT_DIGEST}\`"
+            echo "- Status: candidate only; no tag or release was created"
+          } >> "${GITHUB_STEP_SUMMARY}"

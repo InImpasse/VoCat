@@ -25,7 +25,7 @@
 **English** | [العربية](docs/README.ar.md) | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md) | [Français](docs/README.fr.md) | [Русский](docs/README.ru.md) | [Español](docs/README.es.md) | [日本語](docs/README.ja.md)
 
 > [!IMPORTANT]
-> Hardened fork: remote installation, upstream container images, plugins, Export Proxy, and runtime self-update are disabled; release and Docker workflows are fail-closed. Build and deploy locally only from a reviewed, committed SHA in pinned containers using [the security workflow](docs/security-hardening.md); production uses [the dedicated VM procedure](docs/vm-deployment.md).
+> Hardened fork: remote installation, upstream container images, plugins, Export Proxy, and runtime self-update are disabled; release and Docker workflows are fail-closed. Pushes and pull requests build short-lived, read-only security candidates from committed SHAs using [the security workflow](docs/security-hardening.md); production uses [the dedicated VM procedure](docs/vm-deployment.md).
 
 Vocat is an open-source web control panel and engineering toolkit for Quectel EC20/EC25-class cellular modems. It combines modem discovery, live radio status, AT and USSD terminals, SMS, WiFi Calling, eSIM management, network selection, proxy routing, notifications, audit logs, and controlled build and deployment workflows in one self-contained service.
 
@@ -197,7 +197,7 @@ go build -trimpath -ldflags "-s -w" -o vocat ./cmd/vocat
 
 ## Release controls
 
-The `release` and `docker` GitHub Actions workflows are intentionally fail-closed: they do not publish binaries, GHCR images, or `latest` tags. A Git tag is source metadata only and is not a deployment trigger. Build release artifacts locally from a reviewed, committed SHA with `scripts/build-hardened.sh`, then install only the verified local artifact directory.
+The `security-candidate` GitHub Actions workflow builds and scans eligible pushes and pull requests, then retains the complete candidate evidence bundle for seven days. It has read-only permissions and does not create tags, GitHub Releases, or container images. The `release` and `docker` workflows remain fail-closed. A later tag or release requires a separate explicit decision; passing candidate CI is not production approval.
 
 ## Project layout
 
@@ -212,7 +212,7 @@ internal/vowifi/            IKE, EAP-AKA, IMS, and WiFi Calling runtime
 scripts/build-hardened.sh   committed-SHA builder using pinned containers
 scripts/install.sh          verified local-artifact installer; no downloads
 web/src/                    React and TypeScript frontend
-.github/workflows/          fail-closed release and Docker guardrails
+.github/workflows/          read-only candidate CI and fail-closed publishing guards
 ```
 
 ## Responsible use

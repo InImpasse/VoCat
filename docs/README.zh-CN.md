@@ -206,7 +206,7 @@ go build -trimpath -ldflags "-s -w" -o vocat ./cmd/vocat
 
 ## 发布控制
 
-GitHub Actions 中的 `release` 与 `docker` 工作流刻意采用 fail-closed 策略：不会发布二进制、GHCR 镜像或 `latest` 标签。Git 标签只作为源码元数据，不会触发部署。发布产物必须使用 `scripts/build-hardened.sh` 从经过审查且已提交的 SHA 在本地构建，安装器只接受本地已验证的产物目录。
+GitHub Actions 中的 `security-candidate` 工作流会对符合条件的推送和 PR 自动完成构建、安全测试、Gitleaks、npm audit、govulncheck、SBOM 与校验清单，并将完整候选证据包保留 7 天。该工作流只有只读权限，不创建 Tag、GitHub Release 或容器镜像；`release` 与 `docker` 工作流继续保持 fail-closed。候选 CI 通过不代表生产批准，后续打 Tag 或发布必须另行明确决定。
 
 ## 项目结构
 
@@ -221,7 +221,7 @@ internal/vowifi/            IKE、EAP-AKA、IMS 与 WiFi Calling 运行时
 scripts/build-hardened.sh   使用固定容器构建已提交 SHA
 scripts/install.sh          仅安装本地已验证产物；不下载
 web/src/                    React 与 TypeScript 前端
-.github/workflows/          fail-closed 的发布与 Docker 门禁
+.github/workflows/          只读候选 CI 与 fail-closed 发布门禁
 ```
 
 ## 合规使用

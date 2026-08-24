@@ -173,3 +173,55 @@ func TestContainerToolchainsArePinnedAndPublishingStaysDisabled(t *testing.T) {
 		}
 	}
 }
+
+func TestSecurityCandidateWorkflowIsReadOnlyAndCannotPublish(t *testing.T) {
+	contents, err := os.ReadFile("../../.github/workflows/security-candidate.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(contents)
+
+	for _, required := range []string{
+		"push:",
+		`- security-hardening`,
+		`- "merge/upstream-*"`,
+		"pull_request:",
+		"workflow_dispatch:",
+		"contents: read",
+		"persist-credentials: false",
+		"actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+		"actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+		`test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"`,
+		"scripts/build-hardened.sh amd64",
+		"VOCAT_BUILD_CACHE_ROOT: ${{ runner.temp }}/vocat-cache",
+		"name: vocat-security-candidate-${{ github.sha }}-linux-amd64",
+		"path: dist/hardened/${{ github.sha }}",
+		"retention-days: 7",
+		"if-no-files-found: error",
+		"overwrite: false",
+		"ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}",
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("security candidate workflow is missing %q", required)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"contents: write",
+		"packages: write",
+		"id-token: write",
+		"pull_request_target:",
+		"docker/login-action",
+		"docker/build-push-action",
+		"docker push",
+		"gh release",
+		"git tag",
+	} {
+		if strings.Contains(workflow, forbidden) {
+			t.Errorf("security candidate workflow contains publishing capability %q", forbidden)
+		}
+	}
+	if count := strings.Count(workflow, "uses:"); count != 2 {
+		t.Errorf("security candidate workflow must contain exactly two pinned Actions, got %d", count)
+	}
+}

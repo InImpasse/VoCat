@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestDJIUSBControlTransferLayout(t *testing.T) {
@@ -64,6 +66,88 @@ func TestRepairDJIQMIRequiresQMICLIBeforeUSBAccess(t *testing.T) {
 	if strings.Contains(err.Error(), "DTR repair attempt") || strings.Contains(err.Error(), "USB topology") {
 		t.Fatalf("repairDJIQMI() touched the repair path before checking qmicli: %v", err)
 	}
+}
+
+func TestDiscoverDJIUSBNamesSortsAllMatchingDevices(t *testing.T) {
+	usbRoot := t.TempDir()
+	for _, fixture := range []struct{ name, vendor, product string }{
+		{"3-1", "2ca3", "4006"},
+		{"1-2", "2CA3", "4006"},
+		{"2-4", "ffff", "4006"},
+		{"1-3", "2ca3", "4006"},
+	} {
+		device := filepath.Join(usbRoot, fixture.name)
+		if err := os.MkdirAll(device, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(device, "idVendor"), []byte(fixture.vendor), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(device, "idProduct"), []byte(fixture.product), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	names, err := discoverDJIUSBNames(usbRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"1-2", "1-3", "3-1"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("DJI USB names = %v, want %v", names, want)
+	}
+}
+
+func TestRepairDJIQMIAtRejectsEmptyTopology(t *testing.T) {
+	sysRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(sysRoot, "bus", "usb", "devices"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	results, err := repairDJIQMIAt(context.Background(), sysRoot, t.TempDir(), "qmicli")
+	if err == nil || len(results) != 0 || !strings.Contains(err.Error(), "expected at least one DJI 2ca3:4006 USB device") {
+		t.Fatalf("results=%v error=%v, want empty-topology failure", results, err)
+	}
+}
+
+func TestRepairDJIDevicesContinuesAfterFailure(t *testing.T) {
+	var attempted []string
+	results, err := repairDJIDevices(context.Background(), []string{"1-1", "1-2", "1-3"},
+		func(_ context.Context, name string) (djiQMIRepairResult, error) {
+			attempted = append(attempted, name)
+			if name == "1-2" {
+				return djiQMIRepairResult{}, errors.New("test failure")
+			}
+			return djiQMIRepairResult{USBName: name}, nil
+		})
+	if strings.Join(attempted, ",") != "1-1,1-2,1-3" || len(results) != 3 {
+		t.Fatalf("attempted=%v results=%d, want every device", attempted, len(results))
+	}
+	if err == nil || !strings.Contains(err.Error(), "DJI device 2 of 3") || strings.Contains(err.Error(), "1-2") {
+		t.Fatalf("aggregate error = %v, want ordinal without USB topology", err)
+	}
+}
+
+func TestDJIRepairLockSerializesProcesses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "repair.lock")
+	first, err := acquireDJIRepairLock(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(first)
+
+	waitContext, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := acquireDJIRepairLock(waitContext, path); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second lock error = %v, want context deadline", err)
+	}
+	if err := unix.Flock(first, unix.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	second, err := acquireDJIRepairLock(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unix.Close(second)
 }
 
 func TestDJISerialInterfaceLayout(t *testing.T) {

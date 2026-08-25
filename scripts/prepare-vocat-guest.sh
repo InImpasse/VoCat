@@ -12,7 +12,7 @@ readonly LEGACY_TAILSCALE_LIST=/etc/apt/sources.list.d/tailscale.list
 readonly FIREWALL_TEMPLATE=$REPO_ROOT/deploy/vocat-firewall.nft.in
 readonly FIREWALL_UNIT_SOURCE=$REPO_ROOT/deploy/vocat-firewall.service
 readonly VOCAT_UNIT_SOURCE=$REPO_ROOT/deploy/vocat.service
-readonly DJI_REPAIR_UNIT_SOURCE=$REPO_ROOT/deploy/vocat-dji-repair.service
+readonly DJI_REPAIR_UNIT_SOURCE=$REPO_ROOT/deploy/vocat-dji-repair@.service
 readonly DJI_RULES_SOURCE=$REPO_ROOT/deploy/99-vocat-dji.rules
 readonly NFTABLES_MAIN=/etc/nftables.conf
 readonly NFTABLES_INCLUDE='include "/etc/vocat/vocat-firewall.nft"'
@@ -146,7 +146,7 @@ validate_live_firewall() {
 }
 
 validate_guest_state() {
-  local include_count modem_state repair_enabled repair_state service_name
+  local include_count modem_state service_name
   for service_name in nftables.service vocat-firewall.service; do
     systemctl is-enabled --quiet "$service_name" || die "required service is not enabled: $service_name"
     systemctl is-active --quiet "$service_name" || die "required service is not active: $service_name"
@@ -170,11 +170,13 @@ validate_guest_state() {
   assert_installed_file "$FIREWALL_SOURCE" /etc/vocat/vocat-firewall.nft 600
   assert_installed_file "$FIREWALL_UNIT_SOURCE" /etc/systemd/system/vocat-firewall.service 644
   assert_installed_file "$VOCAT_UNIT_SOURCE" /etc/systemd/system/vocat.service 644
-  assert_installed_file "$DJI_REPAIR_UNIT_SOURCE" /etc/systemd/system/vocat-dji-repair.service 644
+  assert_installed_file "$DJI_REPAIR_UNIT_SOURCE" /etc/systemd/system/vocat-dji-repair@.service 644
+  [[ ! -e /etc/systemd/system/vocat-dji-repair.service && ! -L /etc/systemd/system/vocat-dji-repair.service ]] ||
+    die 'legacy manual-only DJI repair unit is present'
   assert_installed_file "$DJI_RULES_SOURCE" /etc/udev/rules.d/99-vocat-dji.rules 644
   assert_unit_profile vocat-firewall.service /etc/systemd/system/vocat-firewall.service
   assert_unit_profile vocat.service /etc/systemd/system/vocat.service
-  assert_unit_profile vocat-dji-repair.service /etc/systemd/system/vocat-dji-repair.service
+  assert_unit_profile vocat-dji-repair@probe.service /etc/systemd/system/vocat-dji-repair@.service
   nft --check --file "$NFTABLES_MAIN" || die 'persistent nftables ruleset does not validate'
   nft list table inet vocat_ingress >/dev/null || die 'VoCat nftables table is missing'
   validate_live_firewall
@@ -186,11 +188,6 @@ validate_guest_state() {
   validate_preflight_account
   id -nG vocat | tr ' ' '\n' | grep -Fxq vocat-modem || die 'vocat service account lacks the modem group'
   systemctl is-enabled --quiet vocat.service || die 'vocat.service is not enabled'
-  repair_enabled=$(systemctl is-enabled vocat-dji-repair.service 2>/dev/null || true)
-  [[ $repair_enabled != enabled && $repair_enabled != enabled-runtime && $repair_enabled != linked && $repair_enabled != linked-runtime && $repair_enabled != alias ]] ||
-    die 'manual-only vocat-dji-repair.service must not be enabled'
-  repair_state=$(systemctl show --property=ActiveState --value vocat-dji-repair.service 2>/dev/null || true)
-  [[ $repair_state == inactive ]] || die 'manual-only vocat-dji-repair.service must be inactive'
 }
 
 shell_join() {
@@ -340,7 +337,8 @@ if [[ $mode == dry-run ]]; then
   run install -o root -g root -m 0600 "$FIREWALL_SOURCE" /etc/vocat/vocat-firewall.nft
   run install -o root -g root -m 0644 "$FIREWALL_UNIT_SOURCE" /etc/systemd/system/vocat-firewall.service
   run install -o root -g root -m 0644 "$VOCAT_UNIT_SOURCE" /etc/systemd/system/vocat.service
-  run install -o root -g root -m 0644 "$DJI_REPAIR_UNIT_SOURCE" /etc/systemd/system/vocat-dji-repair.service
+  run rm -f -- /etc/systemd/system/vocat-dji-repair.service
+  run install -o root -g root -m 0644 "$DJI_REPAIR_UNIT_SOURCE" /etc/systemd/system/vocat-dji-repair@.service
   log "DRY RUN: would ensure exactly one VoCat include in $NFTABLES_MAIN."
   run nft --check --file "$NFTABLES_MAIN"
   run systemctl daemon-reload
@@ -350,7 +348,7 @@ if [[ $mode == dry-run ]]; then
   run systemctl enable vocat-firewall.service
   run systemctl restart vocat-firewall.service
   run systemctl enable vocat.service
-  log 'DRY RUN: would leave the DJI repair unit manual-only and disabled.'
+  log 'DRY RUN: would install udev-triggered DJI repair template without enabling a persistent service.'
   log 'DRY RUN: would finish with the same file, legacy-state absence, account, unit, service, and live nft JSON semantic checks as --check.'
   log 'Dry run only. No guest state was changed.'
   exit 0
@@ -429,7 +427,8 @@ firewall_staging=$(mktemp /etc/vocat/.vocat-firewall.nft.XXXXXX)
 run install -o root -g root -m 0600 "$FIREWALL_SOURCE" "$firewall_staging"
 run install -o root -g root -m 0644 "$FIREWALL_UNIT_SOURCE" /etc/systemd/system/vocat-firewall.service
 run install -o root -g root -m 0644 "$VOCAT_UNIT_SOURCE" /etc/systemd/system/vocat.service
-run install -o root -g root -m 0644 "$DJI_REPAIR_UNIT_SOURCE" /etc/systemd/system/vocat-dji-repair.service
+run rm -f -- /etc/systemd/system/vocat-dji-repair.service
+run install -o root -g root -m 0644 "$DJI_REPAIR_UNIT_SOURCE" /etc/systemd/system/vocat-dji-repair@.service
 [[ -f $NFTABLES_MAIN ]] || die 'nftables package did not create /etc/nftables.conf'
 include_count=$(grep -Fxc "$NFTABLES_INCLUDE" "$NFTABLES_MAIN" || true)
 [[ $include_count == 0 || $include_count == 1 ]] || die 'persistent nftables ruleset contains duplicate VoCat includes'
@@ -454,10 +453,10 @@ run nft --check --file "$NFTABLES_MAIN"
 run systemctl daemon-reload
 assert_installed_file "$FIREWALL_UNIT_SOURCE" /etc/systemd/system/vocat-firewall.service 644
 assert_installed_file "$VOCAT_UNIT_SOURCE" /etc/systemd/system/vocat.service 644
-assert_installed_file "$DJI_REPAIR_UNIT_SOURCE" /etc/systemd/system/vocat-dji-repair.service 644
+assert_installed_file "$DJI_REPAIR_UNIT_SOURCE" /etc/systemd/system/vocat-dji-repair@.service 644
 assert_unit_profile vocat-firewall.service /etc/systemd/system/vocat-firewall.service
 assert_unit_profile vocat.service /etc/systemd/system/vocat.service
-assert_unit_profile vocat-dji-repair.service /etc/systemd/system/vocat-dji-repair.service
+assert_unit_profile vocat-dji-repair@probe.service /etc/systemd/system/vocat-dji-repair@.service
 run systemctl enable --now nftables.service
 run systemctl start qemu-guest-agent.service
 run systemctl enable vocat-firewall.service

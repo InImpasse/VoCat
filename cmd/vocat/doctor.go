@@ -82,7 +82,7 @@ func runDoctor(args []string) error {
 		if err != nil {
 			return fmt.Errorf("repair DJI QMI binding: %w", err)
 		}
-		add("dji_qmi_repair", "passed", "dji_usb_interfaces_repaired", "DJI serial interfaces 0-3 were bound to option and interface 4 to qmi_wwan after a transient CDC DTR assertion; modem NV and USB identity were not changed", result)
+		add("dji_qmi_repair", "passed", "dji_usb_interfaces_repaired", fmt.Sprintf("Repaired AT/QMI bindings for %d DJI USB device(s); modem NV and USB identity were not changed", len(result)), result)
 	}
 
 	candidates, discoverErr := modem.NewSystemDiscoverer().Discover(ctx)

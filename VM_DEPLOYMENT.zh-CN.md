@@ -298,6 +298,20 @@ sudo ./scripts/configure-dji-usb-passthrough.sh --apply
 已登记设备后续会自动热插拔。开始调制解调器测试前，必须对每台设备分别验证
 冷启动、热插拔、拔出/重插和 VM 重启。
 
+来宾收到精确 `2ca3:4006` USB add 事件后，会启动隔离的自动修复实例。修复器
+串行处理并发事件，把接口 0-3 绑定到 `option`，执行 DTR 唤醒，把接口 4 绑定到
+`qmi_wwan`，并对每台匹配设备执行只读 QMI DMS 检查；不会写入 modem NV、
+固件或 SIM 状态。如果安装自动化时设备已经连接，需要精确触发一次：
+
+```bash
+sudo udevadm trigger --action=add --subsystem-match=usb \
+  --attr-match=idVendor=2ca3 --attr-match=idProduct=4006
+```
+
+私有诊断可运行 `sudo /opt/vocat/current/vocat doctor --repair-dji-qmi
+--timeout 60s`。自动实例不会把详细拓扑写入 journald；手工命令只能在私有控制台
+使用。
+
 固件只在维护窗读取。先停止 VoCat，再使用 `scripts/read-dji-firmware.sh`；它只
 发送 `ATI`、`AT+CGMM` 和 `AT+CGMR`。首轮部署不升级固件。
 

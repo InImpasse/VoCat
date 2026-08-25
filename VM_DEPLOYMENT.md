@@ -321,6 +321,22 @@ adding a new physical device; already enrolled devices hotplug automatically.
 Validate each device independently after cold boot, hotplug, unplug/replug, and
 VM restart before modem testing.
 
+Inside the guest, an exact `2ca3:4006` USB add event starts an isolated repair
+instance. The repair serializes concurrent events, binds interfaces 0-3 to
+`option`, asserts DTR, binds interface 4 to `qmi_wwan`, and performs a read-only
+QMI DMS check for every connected matching device. It does not write modem NV,
+firmware, or SIM state. After first installing this automation while devices
+are already attached, trigger only the reviewed composition once:
+
+```bash
+sudo udevadm trigger --action=add --subsystem-match=usb \
+  --attr-match=idVendor=2ca3 --attr-match=idProduct=4006
+```
+
+For private diagnostics, run `sudo /opt/vocat/current/vocat doctor
+--repair-dji-qmi --timeout 60s`. Automatic instances suppress detailed topology
+from journald; the manual command is intended only for a private console.
+
 Read firmware only during a maintenance window. Stop VoCat first and use
 `scripts/read-dji-firmware.sh`; it sends only `ATI`, `AT+CGMM`, and `AT+CGMR`.
 Do not upgrade firmware during the initial deployment.

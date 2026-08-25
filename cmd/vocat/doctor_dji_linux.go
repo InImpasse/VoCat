@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -25,6 +26,7 @@ const (
 	djiLastSerialIndex  = 3
 	djiATIndex          = 2
 	djiQMIIndex         = 4
+	djiRepairLockPath   = "/run/lock/vocat-dji-repair.lock"
 )
 
 type usbControlTransfer struct {
@@ -37,14 +39,40 @@ type usbControlTransfer struct {
 	Data        uintptr
 }
 
-func repairDJIQMI(ctx context.Context) (djiQMIRepairResult, error) {
+func repairDJIQMI(ctx context.Context) ([]djiQMIRepairResult, error) {
 	qmicli, err := exec.LookPath("qmicli")
 	if err != nil {
-		return djiQMIRepairResult{}, errors.New("qmicli is required to verify DJI QMI readiness; install libqmi-utils on Debian/Ubuntu/Fedora, libqmi on Arch Linux, or qmi-utils on Alpine")
+		return nil, errors.New("qmicli is required to verify DJI QMI readiness; install libqmi-utils on Debian/Ubuntu/Fedora, libqmi on Arch Linux, or qmi-utils on Alpine")
 	}
-	return retryDJIQMI(ctx, 3, 500*time.Millisecond, func(attemptContext context.Context) (djiQMIRepairResult, error) {
-		return repairDJIQMIAt(attemptContext, "/sys", "/dev", qmicli)
-	})
+	// ponytail: one lock serializes rare hotplug events; split only if real device counts make this a bottleneck.
+	lock, err := acquireDJIRepairLock(ctx, djiRepairLockPath)
+	if err != nil {
+		return nil, err
+	}
+	defer unix.Close(lock)
+	defer unix.Flock(lock, unix.LOCK_UN)
+	return repairDJIQMIAt(ctx, "/sys", "/dev", qmicli)
+}
+
+func acquireDJIRepairLock(ctx context.Context, path string) (int, error) {
+	fd, err := unix.Open(path, unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return -1, fmt.Errorf("open DJI repair lock: %w", err)
+	}
+	for {
+		if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err == nil {
+			return fd, nil
+		} else if !errors.Is(err, syscall.EWOULDBLOCK) {
+			unix.Close(fd)
+			return -1, fmt.Errorf("lock DJI repair: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			unix.Close(fd)
+			return -1, fmt.Errorf("wait for DJI repair lock: %w", ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 func retryDJIQMI(
@@ -75,26 +103,61 @@ func retryDJIQMI(
 	return result, fmt.Errorf("failed after %d DTR repair attempt(s): %w", result.Attempts, err)
 }
 
-func repairDJIQMIAt(ctx context.Context, sysRoot, devRoot, qmicli string) (result djiQMIRepairResult, returnErr error) {
-	usbRoot := filepath.Join(sysRoot, "bus", "usb", "devices")
+func discoverDJIUSBNames(usbRoot string) ([]string, error) {
 	entries, err := os.ReadDir(usbRoot)
 	if err != nil {
-		return result, fmt.Errorf("read USB topology: %w", err)
+		return nil, fmt.Errorf("read USB topology: %w", err)
 	}
-	var usbNames []string
+	var names []string
 	for _, entry := range entries {
 		devicePath := filepath.Join(usbRoot, entry.Name())
 		vendor, vendorErr := readTrimmedFile(filepath.Join(devicePath, "idVendor"))
 		product, productErr := readTrimmedFile(filepath.Join(devicePath, "idProduct"))
 		if vendorErr == nil && productErr == nil &&
 			strings.EqualFold(vendor, djiVendorID) && strings.EqualFold(product, djiProductID) {
-			usbNames = append(usbNames, entry.Name())
+			names = append(names, entry.Name())
 		}
 	}
-	if len(usbNames) != 1 {
-		return result, fmt.Errorf("expected exactly one DJI %s:%s USB device, found %d", djiVendorID, djiProductID, len(usbNames))
+	sort.Strings(names)
+	return names, nil
+}
+
+func repairDJIQMIAt(ctx context.Context, sysRoot, devRoot, qmicli string) ([]djiQMIRepairResult, error) {
+	usbRoot := filepath.Join(sysRoot, "bus", "usb", "devices")
+	usbNames, err := discoverDJIUSBNames(usbRoot)
+	if err != nil {
+		return nil, err
 	}
-	result.USBName = usbNames[0]
+	if len(usbNames) == 0 {
+		return nil, fmt.Errorf("expected at least one DJI %s:%s USB device", djiVendorID, djiProductID)
+	}
+	return repairDJIDevices(ctx, usbNames, func(attemptContext context.Context, usbName string) (djiQMIRepairResult, error) {
+		return retryDJIQMI(attemptContext, 3, 500*time.Millisecond, func(retryContext context.Context) (djiQMIRepairResult, error) {
+			return repairDJIQMIDeviceAt(retryContext, sysRoot, devRoot, qmicli, usbName)
+		})
+	})
+}
+
+func repairDJIDevices(
+	ctx context.Context,
+	usbNames []string,
+	attempt func(context.Context, string) (djiQMIRepairResult, error),
+) ([]djiQMIRepairResult, error) {
+	results := make([]djiQMIRepairResult, 0, len(usbNames))
+	var failures []error
+	for index, usbName := range usbNames {
+		result, err := attempt(ctx, usbName)
+		results = append(results, result)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("DJI device %d of %d: %w", index+1, len(usbNames), err))
+		}
+	}
+	return results, errors.Join(failures...)
+}
+
+func repairDJIQMIDeviceAt(ctx context.Context, sysRoot, devRoot, qmicli, usbName string) (result djiQMIRepairResult, returnErr error) {
+	usbRoot := filepath.Join(sysRoot, "bus", "usb", "devices")
+	result.USBName = usbName
 	result.Interface = fmt.Sprintf("%s:1.%d", result.USBName, djiQMIIndex)
 	devicePath := filepath.Join(usbRoot, result.USBName)
 	interfacePath := filepath.Join(usbRoot, result.Interface)

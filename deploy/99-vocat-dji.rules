@@ -3,4 +3,4 @@
 # restricted by physical path and serial number.
 SUBSYSTEM=="tty", ATTRS{idVendor}=="2ca3", ATTRS{idProduct}=="4006", GROUP="vocat-modem", MODE="0660", TAG+="systemd"
 SUBSYSTEM=="usbmisc", ATTRS{idVendor}=="2ca3", ATTRS{idProduct}=="4006", GROUP="vocat-modem", MODE="0660", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="2ca3", ATTR{idProduct}=="4006", GROUP="vocat-modem", MODE="0660"
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2ca3", ATTR{idProduct}=="4006", GROUP="vocat-modem", MODE="0660", TAG+="systemd", ENV{SYSTEMD_WANTS}+="vocat-dji-repair@%k.service"

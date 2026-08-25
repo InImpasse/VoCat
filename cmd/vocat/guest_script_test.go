@@ -25,7 +25,8 @@ func TestGuestPreparationInstallsDeploymentContract(t *testing.T) {
 		"useradd --system --gid vocat --groups vocat-modem",
 		"useradd --system --gid vocat-preflight --home-dir /nonexistent",
 		`$VOCAT_UNIT_SOURCE" /etc/systemd/system/vocat.service`,
-		`$DJI_REPAIR_UNIT_SOURCE" /etc/systemd/system/vocat-dji-repair.service`,
+		`$DJI_REPAIR_UNIT_SOURCE" /etc/systemd/system/vocat-dji-repair@.service`,
+		`rm -f -- /etc/systemd/system/vocat-dji-repair.service`,
 		"systemctl restart vocat-firewall.service",
 	} {
 		if !strings.Contains(script, required) {
@@ -34,17 +35,40 @@ func TestGuestPreparationInstallsDeploymentContract(t *testing.T) {
 	}
 }
 
-func TestDJIRepairUnitRemainsManual(t *testing.T) {
-	unitBytes, err := os.ReadFile("../../deploy/vocat-dji-repair.service")
+func TestDJIRepairUnitAndRuleAutoRepairExactDevices(t *testing.T) {
+	unitBytes, err := os.ReadFile("../../deploy/vocat-dji-repair@.service")
 	if err != nil {
 		t.Fatal(err)
 	}
 	unit := string(unitBytes)
 	if strings.Contains(unit, "[Install]") {
-		t.Fatal("DJI repair unit must not be enableable automatically")
+		t.Fatal("DJI repair template must be activated only by udev")
 	}
-	if !strings.Contains(unit, "doctor --repair-dji-qmi") {
-		t.Fatal("DJI repair unit is missing the exact repair command")
+	for _, required := range []string{
+		"ConditionFileIsExecutable=/opt/vocat/current/vocat",
+		"doctor --repair-dji-qmi --timeout 60s",
+		"TimeoutStartSec=5min",
+		"StandardOutput=null",
+		"StandardError=null",
+		"NoNewPrivileges=true",
+	} {
+		if !strings.Contains(unit, required) {
+			t.Errorf("DJI repair template is missing %q", required)
+		}
+	}
+	rulesBytes, err := os.ReadFile("../../deploy/99-vocat-dji.rules")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := string(rulesBytes)
+	for _, required := range []string{
+		`ACTION=="add"`, `SUBSYSTEM=="usb"`, `ENV{DEVTYPE}=="usb_device"`,
+		`ATTR{idVendor}=="2ca3"`, `ATTR{idProduct}=="4006"`,
+		`ENV{SYSTEMD_WANTS}+="vocat-dji-repair@%k.service"`,
+	} {
+		if !strings.Contains(rules, required) {
+			t.Errorf("DJI udev automation is missing %q", required)
+		}
 	}
 }
 
@@ -221,7 +245,8 @@ func TestGuestPreparationChecksRepositoryUnitsAndRuntimeState(t *testing.T) {
 		`modem_state == inactive`,
 		`nftables.service vocat-firewall.service`,
 		`systemctl is-active --quiet qemu-guest-agent.service`,
-		`repair_state == inactive`,
+		`legacy manual-only DJI repair unit is present`,
+		`assert_unit_profile vocat-dji-repair@probe.service`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("guest final validation is missing %q", required)

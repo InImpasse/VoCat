@@ -2,12 +2,16 @@
 Description=Repair DJI 4G modem AT/QMI bindings for VoCat
 Documentation=file:///opt/vocat/current/docs/security-hardening.md
 After=systemd-udevd.service
+ConditionFileIsExecutable=/opt/vocat/current/vocat
 
 [Service]
 Type=oneshot
 User=root
 Group=root
-ExecStart=/opt/vocat/current/vocat doctor --repair-dji-qmi
+ExecStart=/opt/vocat/current/vocat doctor --repair-dji-qmi --timeout 60s
+TimeoutStartSec=5min
+StandardOutput=null
+StandardError=null
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=false
@@ -23,5 +27,4 @@ LockPersonality=true
 MemoryDenyWriteExecute=true
 UMask=0077
 
-# Intentionally no install section. An administrator must start this unit
-# manually after verifying that exactly one 2ca3:4006 device is attached.
+# No install section: exact 2ca3:4006 USB add events activate an instance.

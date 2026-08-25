@@ -30,7 +30,7 @@ func TestVMCreationRejectsUnsafeResourceValues(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			args := []string{"../../scripts/create-vocat-vm.sh", "--dry-run", "--lan-interface", "test0", "--bulk-storage-root", "/tmp"}
+			args := []string{"../../scripts/create-vocat-vm.sh", "--dry-run", "--bulk-storage-root", "/tmp"}
 			args = append(args, test.resource...)
 			output, err := exec.Command("bash", args...).CombinedOutput()
 			if err == nil {

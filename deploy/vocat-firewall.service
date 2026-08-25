@@ -1,5 +1,5 @@
 [Unit]
-Description=Restrict VoCat port 7575 to the trusted LAN and Tailscale
+Description=Restrict VoCat port 7575 to the host reverse proxy
 After=nftables.service
 Wants=nftables.service
 Before=vocat.service

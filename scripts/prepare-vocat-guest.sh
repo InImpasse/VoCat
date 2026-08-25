@@ -7,12 +7,8 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 readonly SCRIPT_DIR
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 readonly REPO_ROOT
-readonly TAILSCALE_KEY_URL=https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg
-readonly TAILSCALE_KEY_FINGERPRINT=2596A99EAAB33821893C0A79458CA832957F5868
-readonly TAILSCALE_KEYRING=/usr/share/keyrings/tailscale-archive-keyring.gpg
-readonly TAILSCALE_LIST=/etc/apt/sources.list.d/tailscale.list
-readonly TAILSCALE_LIST_COMMENT='# Tailscale packages for Ubuntu 24.04 (noble)'
-readonly TAILSCALE_LIST_REPOSITORY='deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main'
+readonly LEGACY_TAILSCALE_KEYRING=/usr/share/keyrings/tailscale-archive-keyring.gpg
+readonly LEGACY_TAILSCALE_LIST=/etc/apt/sources.list.d/tailscale.list
 readonly FIREWALL_TEMPLATE=$REPO_ROOT/deploy/vocat-firewall.nft.in
 readonly FIREWALL_UNIT_SOURCE=$REPO_ROOT/deploy/vocat-firewall.service
 readonly VOCAT_UNIT_SOURCE=$REPO_ROOT/deploy/vocat.service
@@ -22,7 +18,7 @@ readonly NFTABLES_MAIN=/etc/nftables.conf
 readonly NFTABLES_INCLUDE='include "/etc/vocat/vocat-firewall.nft"'
 
 mode=check
-lan_cidr=
+proxy_source_ipv4=
 FIREWALL_SOURCE=
 tmp_dir=
 firewall_staging=
@@ -33,18 +29,16 @@ firewall_target_existed=false
 usage() {
   cat <<'EOF'
 Usage: prepare-vocat-guest.sh [--check | --dry-run | --apply] \
-       --lan-cidr CIDR
+       --proxy-source-ipv4 ADDRESS
 
 Prepare an installed Ubuntu Server 24.04 VoCat guest. The default --check is
 read-only. --apply must run as root from a private console and will:
 
-  - install qemu-guest-agent, libqmi tools, deployment dependencies, nftables, and Tailscale;
+  - install qemu-guest-agent, libqmi tools, deployment dependencies, and nftables;
   - mask ModemManager so it cannot claim the passed-through modem;
-  - allow TCP/7575 only from local loopback, the supplied LAN CIDR, or tailscale0;
+  - allow TCP/7575 only from local loopback or the supplied host-proxy IPv4 address;
+  - remove legacy Tailscale package and repository state;
   - install least-privilege udev access for the supported DJI USB device.
-
-The script does not authenticate Tailscale and accepts no auth key. Run
-`tailscale up` separately in the guest's private console.
 EOF
 }
 
@@ -105,18 +99,6 @@ assert_root_file_secure() {
   (( (8#$mode & 0022) == 0 )) || die "installed file is group/world writable: $target"
 }
 
-assert_tailscale_repository() {
-  local key_summary
-  assert_root_file_metadata "$TAILSCALE_KEYRING" 644
-  assert_root_file_metadata "$TAILSCALE_LIST" 644
-  key_summary=$(gpg --batch --show-keys --with-colons "$TAILSCALE_KEYRING" 2>/dev/null |
-    awk -F: '$1 == "pub" { public_keys++ } $1 == "fpr" && primary == "" { primary=$10 } END { print public_keys ":" primary }') ||
-    die 'cannot inspect the installed Tailscale repository keyring'
-  [[ $key_summary == "1:$TAILSCALE_KEY_FINGERPRINT" ]] || die 'installed Tailscale repository keyring is not the reviewed key'
-  cmp -s -- <(printf '%s\n%s\n' "$TAILSCALE_LIST_COMMENT" "$TAILSCALE_LIST_REPOSITORY") "$TAILSCALE_LIST" ||
-    die 'installed Tailscale repository source differs from the reviewed source'
-}
-
 assert_unit_profile() {
   local unit=$1
   local expected_fragment=$2
@@ -130,20 +112,15 @@ assert_unit_profile() {
 validate_live_firewall() {
   local live_json
   live_json=$(nft --json list chain inet vocat_ingress input) || die 'cannot inspect the live VoCat firewall chain'
-  jq -e --arg lan_network "$lan_network" --argjson lan_prefix "$lan_prefix" '
+  jq -e --arg proxy_source_ipv4 "$proxy_source_ipv4" '
     def equals($left; $right):
       {"match": {"op": "==", "left": $left, "right": $right}};
     def interface($name):
       equals({"meta": {"key": "iifname"}}; $name);
     def tcp_7575:
       equals({"payload": {"protocol": "tcp", "field": "dport"}}; 7575);
-    def lan_source:
-      equals(
-        {"payload": {"protocol": "ip", "field": "saddr"}};
-        {"prefix": {"addr": $lan_network, "len": $lan_prefix}}
-      );
-    def reverse_path_exists:
-      equals({"fib": {"result": "oif", "flags": ["saddr", "iif"]}}; true);
+    def proxy_source:
+      equals({"payload": {"protocol": "ip", "field": "saddr"}}; $proxy_source_ipv4);
     def accept: {"accept": null};
     def reject_reset: {"reject": {"type": "tcp reset"}};
 
@@ -157,30 +134,36 @@ validate_live_firewall() {
     $chains[0].hook == "input" and
     $chains[0].prio == -5 and
     $chains[0].policy == "accept" and
-    ($rules | length) == 4 and
+    ($rules | length) == 3 and
     ($rules | all(.family == "inet" and .table == "vocat_ingress" and .chain == "input")) and
-    $rules[0].comment == "vocat-policy-v2-loopback" and
+    $rules[0].comment == "vocat-policy-v3-loopback" and
     $rules[0].expr == [interface("lo"), tcp_7575, accept] and
-    $rules[1].comment == "vocat-policy-v2-tailscale" and
-    $rules[1].expr == [interface("tailscale0"), tcp_7575, accept] and
-    $rules[2].comment == "vocat-policy-v2-lan-rpf" and
-    $rules[2].expr == [lan_source, reverse_path_exists, tcp_7575, accept] and
-    $rules[3].comment == "vocat-policy-v2-default-reject" and
-    $rules[3].expr == [tcp_7575, reject_reset]
+    $rules[1].comment == "vocat-policy-v3-host-proxy" and
+    $rules[1].expr == [proxy_source, tcp_7575, accept] and
+    $rules[2].comment == "vocat-policy-v3-default-reject" and
+    $rules[2].expr == [tcp_7575, reject_reset]
   ' <<<"$live_json" >/dev/null || die 'live VoCat firewall semantics differ from the reviewed policy'
 }
 
 validate_guest_state() {
   local include_count modem_state repair_enabled repair_state service_name
-  for service_name in nftables.service qemu-guest-agent.service tailscaled.service vocat-firewall.service; do
+  for service_name in nftables.service vocat-firewall.service; do
     systemctl is-enabled --quiet "$service_name" || die "required service is not enabled: $service_name"
     systemctl is-active --quiet "$service_name" || die "required service is not active: $service_name"
   done
+  systemctl is-active --quiet qemu-guest-agent.service || die 'qemu-guest-agent.service is not active'
   [[ $(systemctl is-enabled ModemManager.service 2>/dev/null) == masked ]] || die 'ModemManager is not masked'
   modem_state=$(systemctl show --property=ActiveState --value ModemManager.service 2>/dev/null || true)
   [[ $modem_state == inactive ]] || die 'ModemManager is not inactive'
 
-  assert_tailscale_repository
+  ! dpkg-query -W -f='${Status}\n' tailscale 2>/dev/null | grep -Fxq 'install ok installed' ||
+    die 'Tailscale package must not be installed'
+  ! systemctl is-active --quiet tailscaled.service || die 'tailscaled.service must not be active'
+  [[ ! -e $LEGACY_TAILSCALE_KEYRING && ! -L $LEGACY_TAILSCALE_KEYRING ]] ||
+    die 'legacy Tailscale repository keyring is present'
+  [[ ! -e $LEGACY_TAILSCALE_LIST && ! -L $LEGACY_TAILSCALE_LIST ]] ||
+    die 'legacy Tailscale repository source is present'
+  ! ip link show dev tailscale0 >/dev/null 2>&1 || die 'tailscale0 must not exist in the fixed guest profile'
   assert_root_file_metadata "$NFTABLES_MAIN" 644
   include_count=$(grep -Fxc "$NFTABLES_INCLUDE" "$NFTABLES_MAIN" || true)
   [[ $include_count == 1 ]] || die 'persistent nftables ruleset must contain exactly one VoCat include'
@@ -208,10 +191,6 @@ validate_guest_state() {
     die 'manual-only vocat-dji-repair.service must not be enabled'
   repair_state=$(systemctl show --property=ActiveState --value vocat-dji-repair.service 2>/dev/null || true)
   [[ $repair_state == inactive ]] || die 'manual-only vocat-dji-repair.service must be inactive'
-
-  if ! ip link show dev tailscale0 >/dev/null 2>&1; then
-    log 'WARNING: tailscale0 is absent; complete tailscale up from the private guest console.'
-  fi
 }
 
 shell_join() {
@@ -273,9 +252,9 @@ while (($#)); do
       mode=${1#--}
       shift
       ;;
-    --lan-cidr)
-      (($# >= 2)) || die '--lan-cidr requires a value'
-      lan_cidr=$2
+    --proxy-source-ipv4)
+      (($# >= 2)) || die '--proxy-source-ipv4 requires a value'
+      proxy_source_ipv4=$2
       shift 2
       ;;
     -h|--help)
@@ -288,20 +267,23 @@ while (($#)); do
   esac
 done
 
-read -r lan_network lan_prefix < <(python3 - "$lan_cidr" <<'PY'
+proxy_source_ipv4=$(python3 - "$proxy_source_ipv4" <<'PY'
 import ipaddress
 import sys
 
 try:
-    network = ipaddress.ip_network(sys.argv[1], strict=True)
+    address = ipaddress.ip_address(sys.argv[1])
 except ValueError as exc:
-    raise SystemExit(f"ERROR: invalid --lan-cidr: {exc}")
-if network.version != 4:
-    raise SystemExit("ERROR: --lan-cidr must be IPv4")
-print(network.network_address, network.prefixlen)
+    raise SystemExit(f"ERROR: invalid --proxy-source-ipv4: {exc}")
+if address.version != 4:
+    raise SystemExit("ERROR: --proxy-source-ipv4 must be IPv4")
+private_networks = tuple(ipaddress.ip_network(network) for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+if not any(address in network for network in private_networks):
+    raise SystemExit("ERROR: --proxy-source-ipv4 must be a usable private IPv4 address")
+print(address)
 PY
 )
-[[ -n $lan_network && -n $lan_prefix ]] || die '--lan-cidr validation failed'
+[[ -n $proxy_source_ipv4 ]] || die '--proxy-source-ipv4 validation failed'
 
 [[ -r /etc/os-release ]] || die '/etc/os-release is unavailable'
 # shellcheck disable=SC1091
@@ -316,19 +298,16 @@ done
 tmp_dir=$(mktemp -d)
 FIREWALL_SOURCE=$tmp_dir/vocat-firewall.nft
 firewall_contents=$(<"$FIREWALL_TEMPLATE")
-firewall_contents=${firewall_contents//@LAN_CIDR@/$lan_cidr}
+firewall_contents=${firewall_contents//@PROXY_SOURCE_IPV4@/$proxy_source_ipv4}
 printf '%s\n' "$firewall_contents" >"$FIREWALL_SOURCE"
 
 if [[ $mode == dry-run ]]; then
+  log 'DRY RUN: would remove any legacy Tailscale package, service, repository, and interface state.'
+  run systemctl disable --now tailscaled.service
+  run apt-get purge -y tailscale
+  run rm -f -- "$LEGACY_TAILSCALE_KEYRING" "$LEGACY_TAILSCALE_LIST"
   run apt-get update
-  run apt-get install -y --no-install-recommends ca-certificates curl gnupg iproute2 jq libqmi-utils nftables python3 qemu-guest-agent sqlite3 usbutils
-  run curl --proto =https --tlsv1.2 --fail --silent --show-error --location --output /tmp/verified-tailscale-key.gpg "$TAILSCALE_KEY_URL"
-  log "DRY RUN: would require exactly one repository key with primary fingerprint $TAILSCALE_KEY_FINGERPRINT."
-  run install -o root -g root -m 0644 /tmp/verified-tailscale-key.gpg "$TAILSCALE_KEYRING"
-  log "DRY RUN: would generate $TAILSCALE_LIST with the exact reviewed noble repository entry."
-  run install -o root -g root -m 0644 /tmp/generated-tailscale.list "$TAILSCALE_LIST"
-  run apt-get update
-  run apt-get install -y --no-install-recommends tailscale
+  run apt-get install -y --no-install-recommends ca-certificates curl iproute2 jq libqmi-utils nftables python3 qemu-guest-agent sqlite3 usbutils
   if systemctl list-unit-files ModemManager.service --no-legend 2>/dev/null | grep -q '^ModemManager.service'; then
     run systemctl disable --now ModemManager.service
   else
@@ -366,19 +345,20 @@ if [[ $mode == dry-run ]]; then
   run nft --check --file "$NFTABLES_MAIN"
   run systemctl daemon-reload
   log 'DRY RUN: would reject any unit drop-in before activating the reviewed units.'
-  run systemctl enable --now nftables.service qemu-guest-agent.service tailscaled.service
+  run systemctl enable --now nftables.service
+  run systemctl start qemu-guest-agent.service
   run systemctl enable vocat-firewall.service
   run systemctl restart vocat-firewall.service
   run systemctl enable vocat.service
   log 'DRY RUN: would leave the DJI repair unit manual-only and disabled.'
-  log 'DRY RUN: would finish with the same file, repository trust, account, unit, service, and live nft JSON semantic checks as --check.'
-  log 'Dry run only. Tailscale authentication is intentionally a separate private-console step.'
+  log 'DRY RUN: would finish with the same file, legacy-state absence, account, unit, service, and live nft JSON semantic checks as --check.'
+  log 'Dry run only. No guest state was changed.'
   exit 0
 fi
 
 if [[ $mode == check ]]; then
   ((EUID == 0)) || die '--check requires root only to inspect the active nftables ruleset'
-  for command_name in awk cmp curl getent gpg grep id ip jq nft qmicli sqlite3 ss stat systemctl tailscale tr; do
+  for command_name in awk cmp curl dpkg-query getent grep id ip jq nft qmicli sqlite3 ss stat systemctl tr; do
     command -v "$command_name" >/dev/null 2>&1 || die "required guest command is missing: $command_name"
   done
   validate_guest_state
@@ -387,28 +367,22 @@ if [[ $mode == check ]]; then
 fi
 
 ((EUID == 0)) || die '--apply must be run as root from a private guest console'
-for command_name in apt-get curl gpg install systemctl; do
+for command_name in apt-get curl install systemctl; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
 
+if systemctl list-unit-files tailscaled.service --no-legend 2>/dev/null | grep -q '^tailscaled.service'; then
+  run systemctl disable --now tailscaled.service
+fi
+if dpkg-query -W -f='${Status}\n' tailscale 2>/dev/null | grep -Fxq 'install ok installed'; then
+  run apt-get purge -y tailscale
+fi
+run rm -f -- "$LEGACY_TAILSCALE_KEYRING" "$LEGACY_TAILSCALE_LIST"
 run apt-get update
-run apt-get install -y --no-install-recommends ca-certificates curl gnupg iproute2 jq libqmi-utils nftables python3 qemu-guest-agent sqlite3 usbutils
+run apt-get install -y --no-install-recommends ca-certificates curl iproute2 jq libqmi-utils nftables python3 qemu-guest-agent sqlite3 usbutils
 for command_name in awk cmp cp getent grep groupadd id ip jq mv nft ss stat tr udevadm useradd usermod; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing after base package installation: $command_name"
 done
-
-run curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --output "$tmp_dir/tailscale.gpg" "$TAILSCALE_KEY_URL"
-key_fingerprint=$(gpg --batch --show-keys --with-colons "$tmp_dir/tailscale.gpg" | awk -F: '$1 == "fpr" { print $10; exit }')
-[[ $key_fingerprint == "$TAILSCALE_KEY_FINGERPRINT" ]] || die 'Tailscale repository signing-key fingerprint mismatch'
-run install -o root -g root -m 0644 "$tmp_dir/tailscale.gpg" "$TAILSCALE_KEYRING"
-printf '%s\n' \
-  "$TAILSCALE_LIST_COMMENT" \
-  "$TAILSCALE_LIST_REPOSITORY" \
-  >"$tmp_dir/tailscale.list"
-run install -o root -g root -m 0644 "$tmp_dir/tailscale.list" "$TAILSCALE_LIST"
-assert_tailscale_repository
-run apt-get update
-run apt-get install -y --no-install-recommends tailscale
 
 if systemctl list-unit-files ModemManager.service --no-legend 2>/dev/null | grep -q '^ModemManager.service'; then
   run systemctl disable --now ModemManager.service
@@ -484,7 +458,8 @@ assert_installed_file "$DJI_REPAIR_UNIT_SOURCE" /etc/systemd/system/vocat-dji-re
 assert_unit_profile vocat-firewall.service /etc/systemd/system/vocat-firewall.service
 assert_unit_profile vocat.service /etc/systemd/system/vocat.service
 assert_unit_profile vocat-dji-repair.service /etc/systemd/system/vocat-dji-repair.service
-run systemctl enable --now nftables.service qemu-guest-agent.service tailscaled.service
+run systemctl enable --now nftables.service
+run systemctl start qemu-guest-agent.service
 run systemctl enable vocat-firewall.service
 run systemctl restart vocat-firewall.service
 validate_live_firewall
@@ -493,4 +468,3 @@ validate_guest_state
 firewall_transaction_active=false
 
 log 'Guest base preparation complete.'
-log 'Authenticate Tailscale separately with tailscale up in this private console; do not pass an auth key to this script.'

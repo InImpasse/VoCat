@@ -9,7 +9,6 @@ readonly OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.ms.fd
 mode=check
 vm_name=vocat
 disk_dir=/var/lib/libvirt/images/vocat
-lan_interface=
 bulk_storage_root=
 iso_path=
 iso_sha256=
@@ -32,12 +31,11 @@ Usage: create-vocat-vm.sh [--check | --dry-run | --create] [options]
 Create or verify the constrained VoCat VM profile:
   Ubuntu Server 24.04, q35/KVM, UEFI Secure Boot, vTPM 2.0,
   configurable resources within reviewed bounds, virtio-scsi/discard,
-  libvirt default NAT plus an explicitly selected macvtap interface.
+  and exactly one libvirt default NAT interface.
 
 Options:
   --name NAME             Libvirt domain name (default: vocat)
   --disk-dir PATH         SSD-backed qcow2 directory
-  --lan-interface IFACE   macvtap parent (required)
   --bulk-storage-root PATH
                            non-SSD storage tree forbidden for VM disks
   --iso PATH              Ubuntu Server 24.04 amd64 ISO
@@ -125,11 +123,6 @@ while (($#)); do
       disk_dir=$2
       shift 2
       ;;
-    --lan-interface)
-      (($# >= 2)) || die '--lan-interface requires a value'
-      lan_interface=$2
-      shift 2
-      ;;
     --bulk-storage-root)
       (($# >= 2)) || die '--bulk-storage-root requires a value'
       bulk_storage_root=$2
@@ -171,8 +164,6 @@ while (($#)); do
 done
 
 [[ $vm_name =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$ ]] || die 'invalid VM name'
-[[ -n $lan_interface ]] || die '--lan-interface is required'
-[[ $lan_interface =~ ^[A-Za-z0-9_.:-]{1,32}$ ]] || die 'invalid LAN interface name'
 [[ -n $bulk_storage_root && $bulk_storage_root == /* ]] || die '--bulk-storage-root must be an absolute path'
 [[ $vcpus =~ ^[0-9]{1,2}$ ]] || die '--vcpus must be an integer from 2 to 4'
 vcpus=$((10#$vcpus))
@@ -248,13 +239,13 @@ if [[ $mode == check ]]; then
   live_domain_xml=$(mktemp)
   virsh --connect qemu:///system dumpxml --inactive "$vm_name" >"$inactive_domain_xml"
   virsh --connect qemu:///system dumpxml "$vm_name" >"$live_domain_xml"
-  python3 - "$inactive_domain_xml" "$live_domain_xml" "$disk_path" "$lan_interface" "$OVMF_CODE" "$OVMF_VARS" "$iso_path" "$vcpus" "$memory_mib" <<'PY'
+  python3 - "$inactive_domain_xml" "$live_domain_xml" "$disk_path" "$OVMF_CODE" "$OVMF_VARS" "$iso_path" "$vcpus" "$memory_mib" <<'PY'
 import os
 import stat
 import sys
 import xml.etree.ElementTree as ET
 
-inactive_xml_path, live_xml_path, disk_path, lan_interface, ovmf_code, ovmf_vars, expected_iso, expected_vcpus, expected_memory_mib = sys.argv[1:]
+inactive_xml_path, live_xml_path, disk_path, ovmf_code, ovmf_vars, expected_iso, expected_vcpus, expected_memory_mib = sys.argv[1:]
 expected_vcpus = int(expected_vcpus)
 expected_memory_mib = int(expected_memory_mib)
 
@@ -318,12 +309,14 @@ def validate(xml_path, scope):
     for cdrom in cdroms:
         cdrom_source = cdrom.find("source")
         cdrom_driver = cdrom.find("driver")
+        cdrom_ejected = (cdrom_source is None or
+                         (not cdrom_source.attrib and not list(cdrom_source)))
         scoped_require(cdrom.get("type") == "file" and cdrom.find("readonly") is not None,
                        "CD-ROM must be a read-only file device")
         scoped_require(cdrom_driver is not None and cdrom_driver.get("name") == "qemu" and
-                       cdrom_driver.get("type") == "raw", "CD-ROM driver must use the raw format")
-        cdrom_ejected = (cdrom_source is None or
-                         (not cdrom_source.attrib and not list(cdrom_source)))
+                       (cdrom_driver.get("type") == "raw" or
+                        (scope == "live" and cdrom_ejected and cdrom_driver.get("type") is None)),
+                       "CD-ROM driver must use the raw format")
         if expected_iso and scope == "inactive" and cdrom_ejected:
             continue
         if not expected_iso:
@@ -354,16 +347,14 @@ def validate(xml_path, scope):
                    "virtio-scsi controller is missing")
 
     interfaces = root.findall("./devices/interface")
-    scoped_require(len(interfaces) == 2, "domain must have exactly two network interfaces")
-    has_nat = any(i.get("type") == "network" and i.find("model") is not None and
-                  i.find("model").get("type") == "virtio" and i.find("source") is not None and
-                  i.find("source").get("network") == "default" for i in interfaces)
-    has_macvtap = any(i.get("type") == "direct" and i.find("model") is not None and
-                      i.find("model").get("type") == "virtio" and i.find("source") is not None and
-                      i.find("source").get("dev") == lan_interface and
-                      i.find("source").get("mode") == "bridge" for i in interfaces)
-    scoped_require(has_nat, "default NAT management interface is missing")
-    scoped_require(has_macvtap, "LAN macvtap interface is missing or incorrect")
+    scoped_require(len(interfaces) == 1, "domain must have exactly one network interface")
+    interface = interfaces[0]
+    interface_model = interface.find("model")
+    interface_source = interface.find("source")
+    scoped_require(interface.get("type") == "network" and
+                   interface_model is not None and interface_model.get("type") == "virtio" and
+                   interface_source is not None and interface_source.get("network") == "default",
+                   "the only interface must be the libvirt default NAT network")
 
     tpm = root.find("./devices/tpm")
     scoped_require(tpm is not None and tpm.get("model") == "tpm-crb", "TPM 2.0 CRB device is missing")
@@ -478,8 +469,6 @@ for command_name in qemu-img runuser virt-install virsh; do
 done
 [[ -r $OVMF_CODE ]] || [[ $mode == dry-run ]] || die "Secure Boot firmware is missing: $OVMF_CODE"
 [[ -r $OVMF_VARS ]] || [[ $mode == dry-run ]] || die "Secure Boot variables template is missing: $OVMF_VARS"
-ip link show dev "$lan_interface" >/dev/null 2>&1 || die "LAN interface not found: $lan_interface"
-
 if [[ $mode == create ]]; then
   ((EUID == 0)) || die '--create must be run as root from a private local terminal'
   [[ ! -e $disk_path ]] || die "refusing to overwrite existing disk: $disk_path"
@@ -531,7 +520,6 @@ virt_install_args=(
   --cdrom "$iso_path"
   --os-variant ubuntu24.04
   --network "network=default,model=virtio"
-  --network "type=direct,source=$lan_interface,source_mode=bridge,model=virtio"
   --graphics "spice,listen=127.0.0.1"
   --video virtio
   --console "pty,target.type=serial"
@@ -550,7 +538,7 @@ if [[ $mode == dry-run ]]; then
 fi
 
 if ! "$0" --check --name "$vm_name" --disk-dir "$disk_dir" --bulk-storage-root "$bulk_storage_root" \
-  --lan-interface "$lan_interface" --iso "$iso_path" --vcpus "$vcpus" \
+  --iso "$iso_path" --vcpus "$vcpus" \
   --memory-mib "$memory_mib" --disk-size-gib "$disk_size_gib"; then
   die 'new domain failed reviewed-profile validation and will be removed'
 fi

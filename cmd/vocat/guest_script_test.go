@@ -127,21 +127,25 @@ func TestFirewallAndUSBUnitsFailClosed(t *testing.T) {
 	}
 }
 
-func TestGuestFirewallUsesReversePathAndLivePolicyChecks(t *testing.T) {
+func TestGuestFirewallAllowsOnlyHostProxyAndChecksLivePolicy(t *testing.T) {
 	rulesBytes, err := os.ReadFile("../../deploy/vocat-firewall.nft.in")
 	if err != nil {
 		t.Fatal(err)
 	}
 	rules := string(rulesBytes)
 	for _, required := range []string{
-		`fib saddr . iif oif exists`,
-		`vocat-policy-v2-loopback`,
-		`vocat-policy-v2-tailscale`,
-		`vocat-policy-v2-lan-rpf`,
-		`vocat-policy-v2-default-reject`,
+		`ip saddr @PROXY_SOURCE_IPV4@`,
+		`vocat-policy-v3-loopback`,
+		`vocat-policy-v3-host-proxy`,
+		`vocat-policy-v3-default-reject`,
 	} {
 		if !strings.Contains(rules, required) {
 			t.Errorf("firewall is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"tailscale", "@LAN_CIDR@", "fib saddr"} {
+		if strings.Contains(rules, forbidden) {
+			t.Errorf("firewall contains obsolete policy %q", forbidden)
 		}
 	}
 
@@ -169,7 +173,7 @@ func TestGuestFirewallJSONPolicyRejectsSemanticDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(scriptBytes)
-	startMarker := "  jq -e --arg lan_network \"$lan_network\" --argjson lan_prefix \"$lan_prefix\" '\n"
+	startMarker := "  jq -e --arg proxy_source_ipv4 \"$proxy_source_ipv4\" '\n"
 	start := strings.Index(script, startMarker)
 	if start < 0 {
 		t.Fatal("cannot locate live firewall jq validator")
@@ -188,10 +192,9 @@ func TestGuestFirewallJSONPolicyRejectsSemanticDrift(t *testing.T) {
 		"base chain policy": strings.Replace(trusted, `"policy":"accept"`, `"policy":"drop"`, 1),
 		"base chain hook":   strings.Replace(trusted, `"hook":"input"`, `"hook":"forward"`, 1),
 		"listen port":       strings.Replace(trusted, `"right":7575`, `"right":7576`, 1),
-		"trusted subnet":    strings.Replace(trusted, `"addr":"192.0.2.0"`, `"addr":"198.51.100.0"`, 1),
-		"reverse path":      strings.Replace(trusted, `"right":true`, `"right":false`, 1),
+		"proxy source":      strings.Replace(trusted, `"right":"10.0.0.1"`, `"right":"10.0.0.2"`, 1),
 		"default action":    strings.Replace(trusted, `"type":"tcp reset"`, `"type":"icmpx"`, 1),
-		"trusted comment":   strings.Replace(trusted, `"vocat-policy-v2-loopback"`, `"vocat-policy-v2-tailscale"`, 1),
+		"trusted comment":   strings.Replace(trusted, `"vocat-policy-v3-loopback"`, `"vocat-policy-v3-host-proxy"`, 1),
 	}
 	for name, candidate := range mutations {
 		t.Run(name, func(t *testing.T) {
@@ -210,13 +213,14 @@ func TestGuestPreparationChecksRepositoryUnitsAndRuntimeState(t *testing.T) {
 	}
 	script := string(scriptBytes)
 	for _, required := range []string{
-		`assert_root_file_metadata "$TAILSCALE_KEYRING" 644`,
-		`assert_root_file_metadata "$TAILSCALE_LIST" 644`,
-		`public_keys ":" primary`,
-		`"1:$TAILSCALE_KEY_FINGERPRINT"`,
-		`cmp -s -- <(printf '%s\n%s\n' "$TAILSCALE_LIST_COMMENT" "$TAILSCALE_LIST_REPOSITORY")`,
+		`dpkg-query -W -f='${Status}\n' tailscale`,
+		`tailscaled.service must not be active`,
+		`legacy Tailscale repository keyring is present`,
+		`legacy Tailscale repository source is present`,
+		`tailscale0 must not exist`,
 		`modem_state == inactive`,
-		`nftables.service qemu-guest-agent.service tailscaled.service vocat-firewall.service`,
+		`nftables.service vocat-firewall.service`,
+		`systemctl is-active --quiet qemu-guest-agent.service`,
 		`repair_state == inactive`,
 	} {
 		if !strings.Contains(script, required) {
@@ -264,17 +268,17 @@ func TestGuestFirewallFileTransactionIsRecoverable(t *testing.T) {
 
 func TestGuestDryRunDescribesApplySecurityChecks(t *testing.T) {
 	command := exec.Command("bash", "../../scripts/prepare-vocat-guest.sh", "--dry-run",
-		"--lan-cidr", "192.0.2.0/24")
+		"--proxy-source-ipv4", "10.0.0.1")
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("guest dry-run failed: %v\n%s", err, output)
 	}
 	for _, required := range []string{
-		"primary fingerprint",
+		"remove any legacy Tailscale package",
 		"99-vocat-dji.rules",
 		"stage both firewall files",
 		"reject any unit drop-in",
-		"same file, repository trust, account, unit, service, and live nft JSON semantic checks as --check",
+		"same file, legacy-state absence, account, unit, service, and live nft JSON semantic checks as --check",
 	} {
 		if !strings.Contains(string(output), required) {
 			t.Errorf("dry-run omitted %q\n%s", required, output)
@@ -284,7 +288,7 @@ func TestGuestDryRunDescribesApplySecurityChecks(t *testing.T) {
 
 func assertFirewallPolicyResult(t *testing.T, filter, input string, wantSuccess bool) {
 	t.Helper()
-	command := exec.Command("jq", "-e", "--arg", "lan_network", "192.0.2.0", "--argjson", "lan_prefix", "24", filter)
+	command := exec.Command("jq", "-e", "--arg", "proxy_source_ipv4", "10.0.0.1", filter)
 	command.Stdin = strings.NewReader(input)
 	output, err := command.CombinedOutput()
 	if wantSuccess && err != nil {
@@ -299,10 +303,9 @@ func trustedFirewallJSON() string {
 	return `{"nftables":[
 {"metainfo":{"json_schema_version":1}},
 {"chain":{"family":"inet","table":"vocat_ingress","name":"input","handle":1,"type":"filter","hook":"input","prio":-5,"policy":"accept"}},
-{"rule":{"family":"inet","table":"vocat_ingress","chain":"input","handle":2,"expr":[{"match":{"op":"==","left":{"meta":{"key":"iifname"}},"right":"lo"}},{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":7575}},{"accept":null}],"comment":"vocat-policy-v2-loopback"}},
-{"rule":{"family":"inet","table":"vocat_ingress","chain":"input","handle":3,"expr":[{"match":{"op":"==","left":{"meta":{"key":"iifname"}},"right":"tailscale0"}},{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":7575}},{"accept":null}],"comment":"vocat-policy-v2-tailscale"}},
-{"rule":{"family":"inet","table":"vocat_ingress","chain":"input","handle":4,"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"saddr"}},"right":{"prefix":{"addr":"192.0.2.0","len":24}}}},{"match":{"op":"==","left":{"fib":{"result":"oif","flags":["saddr","iif"]}},"right":true}},{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":7575}},{"accept":null}],"comment":"vocat-policy-v2-lan-rpf"}},
-{"rule":{"family":"inet","table":"vocat_ingress","chain":"input","handle":5,"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":7575}},{"reject":{"type":"tcp reset"}}],"comment":"vocat-policy-v2-default-reject"}}
+{"rule":{"family":"inet","table":"vocat_ingress","chain":"input","handle":2,"expr":[{"match":{"op":"==","left":{"meta":{"key":"iifname"}},"right":"lo"}},{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":7575}},{"accept":null}],"comment":"vocat-policy-v3-loopback"}},
+{"rule":{"family":"inet","table":"vocat_ingress","chain":"input","handle":3,"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"saddr"}},"right":"10.0.0.1"}},{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":7575}},{"accept":null}],"comment":"vocat-policy-v3-host-proxy"}},
+{"rule":{"family":"inet","table":"vocat_ingress","chain":"input","handle":4,"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":7575}},{"reject":{"type":"tcp reset"}}],"comment":"vocat-policy-v3-default-reject"}}
 ]}`
 }
 
@@ -355,7 +358,7 @@ func TestVMProfileRejectsStorageAndDeviceDrift(t *testing.T) {
 		`inactive_hostdevs == live_hostdevs`,
 		`CD-ROM media must be ejected unless --iso is supplied`,
 		`"backing-filename", "full-backing-filename", "data-file"`,
-		`--lan-interface "$lan_interface" --iso "$iso_path"`,
+		`--iso "$iso_path" --vcpus "$vcpus"`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("VM fixed-profile check is missing %q", required)
@@ -374,7 +377,7 @@ func TestVMProfilePythonValidatorRejectsLiveAndCDROMDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(scriptBytes)
-	startMarker := `  python3 - "$inactive_domain_xml" "$live_domain_xml" "$disk_path" "$lan_interface" "$OVMF_CODE" "$OVMF_VARS" "$iso_path" "$vcpus" "$memory_mib" <<'PY'` + "\n"
+	startMarker := `  python3 - "$inactive_domain_xml" "$live_domain_xml" "$disk_path" "$OVMF_CODE" "$OVMF_VARS" "$iso_path" "$vcpus" "$memory_mib" <<'PY'` + "\n"
 	start := strings.Index(script, startMarker)
 	if start < 0 {
 		t.Fatal("cannot locate the VM profile Python validator")
@@ -418,6 +421,8 @@ func TestVMProfilePythonValidatorRejectsLiveAndCDROMDrift(t *testing.T) {
 		fmt.Sprintf(`<source file="%s" index="1" unexpected="value"/>`, isoPath), 1)
 	ejectedInactive := vmProfileXML(diskPath, "", true)
 	ejectedLive := vmProfileXML(diskPath, "", false)
+	ejectedLiveWithoutDriverType := strings.Replace(ejectedLive, `<driver name="qemu" type="raw"/>`, `<driver name="qemu"/>`, 1)
+	attachedLiveWithoutDriverType := strings.Replace(live, `<driver name="qemu" type="raw"/>`, `<driver name="qemu"/>`, 1)
 	blockCDROM := `<disk type="block" device="cdrom"><driver name="qemu" type="raw"/><source dev="/dev/sr0"/><target dev="sda" bus="sata"/><readonly/></disk>`
 	arbitraryFileCDROM := fmt.Sprintf(`<disk type="file" device="cdrom"><driver name="qemu" type="raw"/><source file="%s"/><target dev="sda" bus="sata"/><readonly/></disk>`, arbitraryPath)
 	liveWithQEMUArgs := strings.Replace(live, `<domain type="kvm">`, `<domain type="kvm" xmlns:qemu="http://libvirt.org/schemas/domain/qemu/1.0">`, 1)
@@ -434,6 +439,8 @@ func TestVMProfilePythonValidatorRejectsLiveAndCDROMDrift(t *testing.T) {
 		{name: "valid libvirt live CD-ROM index", inactiveXML: inactive, liveXML: liveWithCDROMIndex, expectedISO: isoPath, wantSuccess: true},
 		{name: "valid libvirt install transition", inactiveXML: ejectedInactive, liveXML: live, expectedISO: isoPath, wantSuccess: true},
 		{name: "valid ejected profile", inactiveXML: ejectedInactive, liveXML: ejectedLive, wantSuccess: true},
+		{name: "valid normalized live ejected profile", inactiveXML: ejectedInactive, liveXML: ejectedLiveWithoutDriverType, wantSuccess: true},
+		{name: "attached live media without raw driver", inactiveXML: inactive, liveXML: attachedLiveWithoutDriverType, expectedISO: isoPath},
 		{name: "live installer media ejected", inactiveXML: ejectedInactive, liveXML: ejectedLive, expectedISO: isoPath},
 		{name: "inactive vCPU drift", inactiveXML: strings.Replace(inactive, "<vcpu>2</vcpu>", "<vcpu>3</vcpu>", 1), liveXML: live, expectedISO: isoPath},
 		{name: "live memory drift", inactiveXML: inactive, liveXML: strings.Replace(live, "<memory unit=\"KiB\">2097152</memory>", "<memory unit=\"KiB\">3145728</memory>", 1), expectedISO: isoPath},
@@ -442,6 +449,8 @@ func TestVMProfilePythonValidatorRejectsLiveAndCDROMDrift(t *testing.T) {
 		{name: "live-only redirection", inactiveXML: inactive, liveXML: addVMDevice(live, `<redirdev bus="usb" type="spicevmc"/>`), expectedISO: isoPath},
 		{name: "live-only smartcard", inactiveXML: inactive, liveXML: addVMDevice(live, `<smartcard mode="passthrough" type="spicevmc"/>`), expectedISO: isoPath},
 		{name: "live-only custom channel", inactiveXML: inactive, liveXML: addVMDevice(live, `<channel type="unix"><target type="virtio" name="custom.channel"/></channel>`), expectedISO: isoPath},
+		{name: "live-only extra network", inactiveXML: inactive, liveXML: addVMDevice(live, `<interface type="network"><source network="default"/><model type="virtio"/></interface>`), expectedISO: isoPath},
+		{name: "inactive direct network", inactiveXML: strings.Replace(inactive, `<interface type="network"><source network="default"/><model type="virtio"/></interface>`, `<interface type="direct"><source dev="lan0" mode="bridge"/><model type="virtio"/></interface>`, 1), liveXML: live, expectedISO: isoPath},
 		{name: "live-only custom qemu command line", inactiveXML: inactive, liveXML: liveWithQEMUArgs, expectedISO: isoPath},
 		{name: "block CD-ROM", inactiveXML: replaceVMCDROM(inactive, blockCDROM), liveXML: replaceVMCDROM(live, blockCDROM), expectedISO: isoPath},
 		{name: "arbitrary file CD-ROM", inactiveXML: replaceVMCDROM(inactive, arbitraryFileCDROM), liveXML: replaceVMCDROM(live, arbitraryFileCDROM), expectedISO: isoPath},
@@ -477,7 +486,7 @@ func assertVMProfileValidator(t *testing.T, validatorPath, diskPath, inactiveXML
 	if err := os.WriteFile(livePath, []byte(liveXML), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command("python3", validatorPath, inactivePath, livePath, diskPath, "testlan0",
+	command := exec.Command("python3", validatorPath, inactivePath, livePath, diskPath,
 		"/usr/share/OVMF/OVMF_CODE_4M.secboot.fd", "/usr/share/OVMF/OVMF_VARS_4M.ms.fd", expectedISO,
 		"2", "2048")
 	output, err := command.CombinedOutput()
@@ -513,7 +522,6 @@ func vmProfileXML(diskPath, isoPath string, inactive bool) string {
     %s
     <controller type="scsi" model="virtio-scsi"/>
     <interface type="network"><source network="default"/><model type="virtio"/></interface>
-    <interface type="direct"><source dev="testlan0" mode="bridge"/><model type="virtio"/></interface>
     <tpm model="tpm-crb"><backend type="emulator" version="2.0"/></tpm>
     <channel type="unix"><target type="virtio" name="org.qemu.guest_agent.0"/></channel>
     <graphics type="spice" listen="127.0.0.1"/>

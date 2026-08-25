@@ -4,10 +4,10 @@
 
 ## 安全边界
 
-- 所有 `sudo`、LUKS 密码、恢复密钥和 Tailscale 登录都必须在宿主机或 VM 的私密本地控制台中完成。不得把密码、auth key、SIM 信息或设备序列号粘贴到聊天、命令参数、日志或仓库文件。
+- 所有 `sudo`、LUKS 密码和恢复密钥都必须在宿主机或 VM 的私密本地控制台中完成。不得把密码、SIM 信息或设备序列号粘贴到聊天、命令参数、日志或仓库文件。
 - VM 中使用 systemd 直接运行 VoCat，不运行特权 Docker。服务只保留 `CAP_NET_ADMIN` 和 `CAP_NET_RAW`，但这两项长期能力仍允许已攻陷的服务修改来宾网络、路由/XFRM 状态并使用原始套接字，属于明确保留的残余风险。来宾内 nftables 只提供正常运行时的入口控制，不能作为服务发生 RCE 后的安全边界；需要抗来宾内服务失陷的隔离时，必须在宿主或上游路由器实施独立 ACL，长期应把特权网络操作拆到窄接口 helper。
 - 大容量存储只保存 ISO、构建缓存和加密备份。VM 的 qcow2、当前 release 和运行中的 SQLite 必须位于 SSD。
-- LAN 上保留的 HTTP 会话可能被同网段监听。7575 仅允许内部 readiness 使用的 loopback、私密提供的可信 LAN CIDR 与 `tailscale0`，远程管理优先使用 Tailscale。
+- VM 只连接 libvirt `default` NAT，不直接连接 LAN。7575 仅允许内部 readiness 使用的 loopback 和私密提供的宿主反向代理源 IPv4；LAN 客户端只能访问宿主反向代理。宿主代理负责 TLS、访问控制和来源限制。
 - USB 直通只允许一个经过 VID/PID、序列号和 `ID_PATH` 联合确认的 USB 设备。不得直通宿主机唯一的 xHCI/PCI 控制器。
 - 识别到 USB、SIM Ready、ePDG 建链和 IMS 注册是不同验收层级，不能互相替代。
 
@@ -49,42 +49,30 @@ sudo /snap/bin/lxc network list
 
 ## 2. 准备 KVM 宿主
 
-先只读检查，再在宿主机的私密终端中执行安装。脚本本身不会调用 sudo。以下变量只在私密终端赋值，不写入仓库或共享日志：
+先只读检查，再在宿主机的私密终端中执行安装。脚本本身不会调用 sudo。宿主专用值只写入权限为 0600 且被 Git 忽略的项目内 `.vocat-local/host-deployment.json`；不要使用导出的环境变量。项目内本地控制器调用如下：
 
 ```bash
-./scripts/prepare-kvm-host.sh --check --lan-interface "$LAN_INTERFACE"
-sudo ./scripts/prepare-kvm-host.sh --apply --admin-user "$LOCAL_ADMIN" --lan-interface "$LAN_INTERFACE"
+./.vocat-local/vocat-hostctl validate
+./.vocat-local/vocat-hostctl host-check
+sudo ./.vocat-local/vocat-hostctl host-apply
 ```
 
-安装后退出并重新登录，使 `libvirt`/`kvm` 组生效，然后再次运行 `--check`。脚本安装 QEMU/KVM、libvirt、OVMF、virt-install、swtpm、guest-agent 所需宿主组件，启用 libvirt `default` NAT 网络，并验证私密提供的 LAN 接口。它不会创建 VM 或 USB 直通。
+安装后退出并重新登录，使 `libvirt`/`kvm` 组生效，然后再次运行 `--check`。脚本安装 QEMU/KVM、libvirt、OVMF、virt-install、swtpm、guest-agent 所需宿主组件，并启用 libvirt `default` NAT 网络。它不会创建 VM、LAN 直连或 USB 直通。
 
 从 Ubuntu 官方 HTTPS 站点取得 24.04.x live-server amd64 ISO、`SHA256SUMS` 和 `SHA256SUMS.gpg`，放入私密提供的大容量存储目录。先按 Ubuntu 官方发布密钥流程验证签名，再取得该 ISO 对应的 SHA-256。不能只信任同一次未认证下载中的散列值。
 
 ## 3. 创建并加密安装 VM
 
-先执行 dry run，再创建固定规格 VM。`<verified-sha256>` 不是秘密，但必须来自已验证签名的校验文件：
+先执行 dry run，再创建固定规格 VM。ISO 路径、已验证 SHA-256 和资源值均从项目内私有配置读取：
 
 ```bash
-sudo ./scripts/create-vocat-vm.sh --dry-run \
-  --disk-dir /var/lib/libvirt/images/vocat \
-  --bulk-storage-root "$BULK_STORAGE_ROOT" \
-  --lan-interface "$LAN_INTERFACE" \
-  --iso "$ISO_PATH" \
-  --iso-sha256 <verified-sha256> \
-  --vcpus 2 --memory-mib 2048 --disk-size-gib 24
-
-sudo ./scripts/create-vocat-vm.sh --create \
-  --disk-dir /var/lib/libvirt/images/vocat \
-  --bulk-storage-root "$BULK_STORAGE_ROOT" \
-  --lan-interface "$LAN_INTERFACE" \
-  --iso "$ISO_PATH" \
-  --iso-sha256 <verified-sha256> \
-  --vcpus 2 --memory-mib 2048 --disk-size-gib 24
+sudo ./.vocat-local/vocat-hostctl vm-dry-run
+sudo ./.vocat-local/vocat-hostctl vm-create
 ```
 
 `--create` 不会把大容量存储上的原始 ISO 直接交给 QEMU。它先把 ISO 复制到 SSD 的 root 管理目录，建立只对 root/libvirt 身份开放的 installer snapshot，检查普通文件、所有权、权限和单链接属性，再按 Ubuntu 签名校验文件中的预期 SHA-256 重新计算并核对副本，最后才调用 `virt-install`。创建失败且新域可安全撤销时会清理临时文件、snapshot 和新 qcow2；若域无法安全 undefine，则保留相关文件并要求人工恢复，避免删除仍被引用的数据。
 
-推荐的短信接收规格为 q35/KVM、UEFI Secure Boot、vTPM 2.0、2 vCPU、2 GiB 内存、24 GiB thin qcow2、virtio-scsi/discard。资源值来自私有配置，但脚本只接受 2–4 vCPU、2048–8192 MiB 内存和 24–64 GiB 磁盘。第一张 virtio 网卡连接 libvirt NAT，供宿主机管理；第二张通过 macvtap 直连私密提供的 LAN 接口。macvtap 默认不能让宿主直接访问来宾，因此 NAT 管理网必须保留。
+推荐的短信接收规格为 q35/KVM、UEFI Secure Boot、vTPM 2.0、2 vCPU、2 GiB 内存、24 GiB thin qcow2、virtio-scsi/discard。资源值来自私有配置，但脚本只接受 2–4 vCPU、2048–8192 MiB 内存和 24–64 GiB 磁盘。域必须恰好只有一张连接 libvirt `default` NAT 的 virtio 网卡；验证器拒绝 macvtap、LAN 直连和任何额外网卡。
 
 连接本地控制台：
 
@@ -98,14 +86,10 @@ SPICE 只监听宿主 loopback，不向 LAN 暴露。首次安装和每次宿主
 
 在 Ubuntu 安装器中选择 `Ubuntu Server (minimized)`，不安装 GUI、第三方驱动或额外 snap；使用整个 24 GiB 虚拟磁盘、建立 LVM，并启用 LUKS 加密。LUKS 密码只在安装器控制台输入，恢复密钥离线保存，不使用 cloud-init、命令参数或仓库文件传递。保留人工解锁：宿主重启时域会自动启动，但来宾在控制台输入 LUKS 密码前不会启动 VoCat。
 
-安装完成后确认两张网卡都获得地址，LAN DHCP 地址无冲突后再到路由器设置固定租约；不要把 MAC、租约或实际地址提交到仓库。随后验证固定配置。日常 `--check` 会针对 qcow2 文件的真实后端重新确认 SSD、所有权、权限、无 backing/external data file 以及受限的 libvirt 设备集合；派生的可用空间门槛只在创建前检查：
+安装完成后确认唯一 NAT 网卡获得地址，并在 libvirt 私有网络中配置本地固定租约；不要把 MAC、租约或实际地址提交到仓库。LAN 路由器不应为该 VM 建立租约或路由。随后验证固定配置。日常 `--check` 会针对 qcow2 文件的真实后端重新确认 SSD、所有权、权限、无 backing/external data file 以及受限的 libvirt 设备集合；派生的可用空间门槛只在创建前检查：
 
 ```bash
-sudo ./scripts/create-vocat-vm.sh --check \
-  --disk-dir /var/lib/libvirt/images/vocat \
-  --bulk-storage-root "$BULK_STORAGE_ROOT" \
-  --lan-interface "$LAN_INTERFACE" \
-  --vcpus 2 --memory-mib 2048 --disk-size-gib 24
+sudo ./.vocat-local/vocat-hostctl vm-check-installed
 ```
 
 成功创建后，SSD 上已校验的 installer snapshot 会保留到系统安装完成并弹出介质，不能在 QEMU 仍引用它时手工删除。系统安装完成后必须从 inactive 与 live 域配置中弹出 ISO；保留的 CD-ROM 只能是只读 raw 设备且不得挂载介质。先用 `virsh domblklist vocat --details` 确认实际 CD-ROM target，再分别处理持久和运行中配置，最后不带 `--iso`、但带相同资源参数运行上述 `--check`。检查会同时拒绝 live/config 中残留或漂移的安装介质及未授权存储设备。确认 inactive/live 配置均已弹出且 `--check` 通过后，才可删除该 installer snapshot。
@@ -115,15 +99,14 @@ sudo ./scripts/create-vocat-vm.sh --check \
 在 VM 私密控制台中，从同一受审阅 commit 提供脚本和 `deploy/` 文件，然后执行：
 
 ```bash
-sudo ./scripts/prepare-vocat-guest.sh --dry-run --lan-cidr "$LAN_CIDR"
-sudo ./scripts/prepare-vocat-guest.sh --apply --lan-cidr "$LAN_CIDR"
-sudo tailscale up
-sudo ./scripts/prepare-vocat-guest.sh --check --lan-cidr "$LAN_CIDR"
+sudo ./scripts/prepare-vocat-guest.sh --dry-run --proxy-source-ipv4 <private-host-proxy-ipv4>
+sudo ./scripts/prepare-vocat-guest.sh --apply --proxy-source-ipv4 <private-host-proxy-ipv4>
+sudo ./scripts/prepare-vocat-guest.sh --check --proxy-source-ipv4 <private-host-proxy-ipv4>
 ```
 
-来宾脚本验证 Tailscale 仓库签名密钥指纹，安装 `qemu-guest-agent`、`libqmi-utils`、nftables 和 Tailscale，mask ModemManager，并加载独立的 `inet vocat_ingress` 表。规则只处理 TCP/7575，不刷新或接管其他 nftables 表；LAN 放行同时要求 `fib saddr . iif oif exists` 反向路径成立，阻止从错误接口伪造可信 LAN CIDR 的源地址。脚本会先验证包含 staged 文件的完整 ruleset，再以可回滚事务替换配置，并用 nft JSON 复核 live 规则语义。`vocat-firewall.service` 使用 `RequiredBy=vocat.service`，防火墙加载失败时 VoCat 不应启动。应用的内网策略默认包含 Tailscale IPv4 `100.64.0.0/10` 和 IPv6 ULA，因此无需改成公网模式。
+来宾脚本安装 `qemu-guest-agent`、`libqmi-utils` 和 nftables，清除旧 Tailscale 包、服务、仓库与接口状态，mask ModemManager，并加载独立的 `inet vocat_ingress` 表。规则只处理 TCP/7575，不刷新或接管其他 nftables 表；只接受 loopback 或精确匹配的私有宿主代理源 IPv4。脚本会先验证包含 staged 文件的完整 ruleset，再以可回滚事务替换配置，并用 nft JSON 复核 live 规则语义。`vocat-firewall.service` 使用 `RequiredBy=vocat.service`，防火墙加载失败时 VoCat 不应启动。
 
-Tailscale 登录是独立的交互步骤；不要向脚本传 auth key。分别从可信 LAN、Tailscale 和一个不可信入口实测：前两者可以访问 7575，不可信入口必须被拒绝。还要确认宿主 NAT 管理地址不能绕过该规则。
+分别从宿主反向代理、VM loopback 和一个非代理来源实测：前两者可以访问 7575，非代理来源必须被拒绝。LAN 客户端只能访问宿主公开的代理端口，不得直接路由到 VM NAT 地址。
 
 构建产物必须由已提交且通过发布门禁的 SHA 产生。构建器输出的 `artifact index sha256` 是 `SHA256SUMS` 文件本身的 SHA-256；在复制 release 目录前，将 reviewed commit 和该 index hash 记录到独立于产物传输的可信带外渠道。不得从到达 VM 的 manifest、目录名或 `SHA256SUMS` 重新推导这两个预期值。将完整 release 目录复制到 VM 后执行：
 
@@ -188,6 +171,6 @@ T-Mobile/Wi-Fi Calling 按以下顺序验收：
 - 大容量存储上的 SQLite 或 VM 备份必须在写入前加密，密钥不得保存在同一存储；同时保留一份通过校验的异机副本。单盘存储不构成可靠备份。
 - 整机 qcow2 备份应在来宾关机或受控快照状态完成；即使来宾磁盘已使用 LUKS，外部备份仍按敏感数据再次加密。
 - 上线后与宿主既有负载并行浸泡 24-48 小时，复核变更前私下记录的容器、监听端口、DNS、路由和出网状态。
-- 浸泡期必须实测坏构建联合回滚、来宾重启后的人工 LUKS 解锁、USB 重枚举、热拔插以及 Tailscale/LAN 防火墙路径。
+- 浸泡期必须实测坏构建联合回滚、来宾重启后的人工 LUKS 解锁、USB 重枚举、热拔插以及宿主反向代理/来宾防火墙路径。
 
 只有代码门禁、VM 安全配置、真实 USB/QMI、IMS 与授权通话测试全部通过，才能把该 release 标记为生产部署完成。

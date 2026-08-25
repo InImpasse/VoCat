@@ -19,7 +19,6 @@ readonly REQUIRED_PACKAGES=(
 
 mode=check
 admin_user=${SUDO_USER:-}
-lan_interface=
 
 usage() {
   cat <<'EOF'
@@ -31,7 +30,6 @@ private local terminal; the script never invokes sudo itself.
 
 Options:
   --admin-user USER       Add USER to the libvirt and kvm groups on --apply
-  --lan-interface IFACE   Verify the explicitly selected macvtap parent
   -h, --help              Show this help
 
 This script does not remove LXD, create a VM, or change existing guests.
@@ -76,11 +74,6 @@ while (($#)); do
       admin_user=$2
       shift 2
       ;;
-    --lan-interface)
-      (($# >= 2)) || die '--lan-interface requires a value'
-      lan_interface=$2
-      shift 2
-      ;;
     -h|--help)
       usage
       exit 0
@@ -92,8 +85,6 @@ while (($#)); do
 done
 
 [[ $(uname -m) == x86_64 ]] || die 'this VM profile requires an x86_64 host'
-[[ -n $lan_interface ]] || die '--lan-interface is required'
-[[ $lan_interface =~ ^[A-Za-z0-9_.:-]{1,32}$ ]] || die 'invalid LAN interface name'
 if [[ -n $admin_user ]]; then
   valid_name "$admin_user" || die 'invalid admin user name'
   id "$admin_user" >/dev/null 2>&1 || die 'admin user does not exist'
@@ -102,8 +93,6 @@ fi
 if ! grep -Eqm1 '(^|[[:space:]])(vmx|svm)($|[[:space:]])' /proc/cpuinfo; then
   die 'CPU virtualization extensions are unavailable or disabled in firmware'
 fi
-ip link show dev "$lan_interface" >/dev/null 2>&1 || die "LAN interface not found: $lan_interface"
-
 if command -v apt-cache >/dev/null 2>&1; then
   for package_name in "${REQUIRED_PACKAGES[@]}"; do
     package_candidate=$(apt-cache policy "$package_name" | awk '/Candidate:/ && !found { print $2; found=1 }')

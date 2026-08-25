@@ -823,7 +823,7 @@ func TestHardenedDeployScriptSandboxesCandidatePreflight(t *testing.T) {
 		`readonly PREFLIGHT_USER="vocat-preflight"`,
 		`readonly PREFLIGHT_ROOT="/var/lib/vocat-preflight"`,
 		`preflight_dir="$(mktemp -d "$PREFLIGHT_ROOT/run.XXXXXX")"`,
-		`--property="InaccessiblePaths=$DATA_DIR $BACKUP_DIR $LOCK_DIR"`,
+		`--property="InaccessiblePaths=$DATA_DIR $BACKUP_DIR"`,
 		`--property="TemporaryFileSystem=/run:rw,nosuid,nodev,noexec,mode=0700"`,
 		`--property=PrivateNetwork=yes`,
 		`--property=PrivateIPC=yes`,
@@ -840,6 +840,9 @@ func TestHardenedDeployScriptSandboxesCandidatePreflight(t *testing.T) {
 		if !strings.Contains(script, required) {
 			t.Errorf("candidate preflight sandbox is missing %q", required)
 		}
+	}
+	if strings.Contains(script, `InaccessiblePaths=$DATA_DIR $BACKUP_DIR $LOCK_DIR`) {
+		t.Fatal("candidate preflight must not hide a path below its private /run filesystem")
 	}
 	if strings.Contains(script, `runuser -u "$SERVICE_USER" -- "$release_dir/vocat"`) {
 		t.Fatal("candidate binary preflight still runs as the live service account")

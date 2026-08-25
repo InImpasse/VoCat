@@ -724,6 +724,8 @@ trap cleanup EXIT
 
 run_candidate_preflight() {
   local password=$1
+  # /run is replaced by the private TemporaryFileSystem below, so the
+  # deployment lock path must not be listed as an inaccessible path here.
   printf '%s\n' "$password" | systemd-run \
     --quiet \
     --wait \
@@ -734,7 +736,7 @@ run_candidate_preflight() {
     --property="Group=$PREFLIGHT_GROUP" \
     --property="WorkingDirectory=$preflight_dir" \
     --property="ReadWritePaths=$preflight_dir" \
-    --property="InaccessiblePaths=$DATA_DIR $BACKUP_DIR $LOCK_DIR" \
+    --property="InaccessiblePaths=$DATA_DIR $BACKUP_DIR" \
     --property="TemporaryFileSystem=/run:rw,nosuid,nodev,noexec,mode=0700" \
     --property=PrivateNetwork=yes \
     --property=PrivateIPC=yes \

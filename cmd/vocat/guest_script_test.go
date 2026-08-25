@@ -416,7 +416,9 @@ func TestVMProfilePythonValidatorRejectsLiveAndCDROMDrift(t *testing.T) {
 		wantSuccess bool
 	}{
 		{name: "valid installed profile", inactiveXML: inactive, liveXML: live, expectedISO: isoPath, wantSuccess: true},
+		{name: "valid libvirt install transition", inactiveXML: ejectedInactive, liveXML: live, expectedISO: isoPath, wantSuccess: true},
 		{name: "valid ejected profile", inactiveXML: ejectedInactive, liveXML: ejectedLive, wantSuccess: true},
+		{name: "live installer media ejected", inactiveXML: ejectedInactive, liveXML: ejectedLive, expectedISO: isoPath},
 		{name: "inactive vCPU drift", inactiveXML: strings.Replace(inactive, "<vcpu>2</vcpu>", "<vcpu>3</vcpu>", 1), liveXML: live, expectedISO: isoPath},
 		{name: "live memory drift", inactiveXML: inactive, liveXML: strings.Replace(live, "<memory unit=\"KiB\">2097152</memory>", "<memory unit=\"KiB\">3145728</memory>", 1), expectedISO: isoPath},
 		{name: "live-only PCI hostdev", inactiveXML: inactive, liveXML: addVMDevice(live, `<hostdev mode="subsystem" type="pci" managed="yes"><source><address domain="0" bus="0" slot="20" function="0"/></source></hostdev>`), expectedISO: isoPath},

@@ -322,8 +322,12 @@ def validate(xml_path, scope):
                        "CD-ROM must be a read-only file device")
         scoped_require(cdrom_driver is not None and cdrom_driver.get("name") == "qemu" and
                        cdrom_driver.get("type") == "raw", "CD-ROM driver must use the raw format")
+        cdrom_ejected = (cdrom_source is None or
+                         (not cdrom_source.attrib and not list(cdrom_source)))
+        if expected_iso and scope == "inactive" and cdrom_ejected:
+            continue
         if not expected_iso:
-            scoped_require(cdrom_source is None or (not cdrom_source.attrib and not list(cdrom_source)),
+            scoped_require(cdrom_ejected,
                            "CD-ROM media must be ejected unless --iso is supplied")
             continue
         cdrom_file = cdrom_source.get("file", "") if cdrom_source is not None else ""

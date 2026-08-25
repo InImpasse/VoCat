@@ -44,9 +44,14 @@ build/*.py
 *.md
 !README.md
 !AGENTS.md
+!VM_DEPLOYMENT.md
+!VM_DEPLOYMENT.zh-CN.md
 !docs/**/*.md
 *.txt
 build/lists/
+
+# ---- Private host deployment state ----
+/.vocat-local/
 
 # ---- Editor / IDE ----
 .vscode/

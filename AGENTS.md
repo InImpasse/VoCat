@@ -33,5 +33,6 @@
 - The supply-chain batch pins build and scanner images, fixes the known `nanoid` advisory, and adds a committed-source release gate. It includes normal/race tests, vet, npm audits, secret scanning, source/binary Go vulnerability scans, source/binary SBOMs, build metadata, and whole-artifact checksums.
 - Preserve three reviewable batches: build chain, authentication/API, and deployment. Keep each fix with its regression test.
 - See `docs/security-hardening.md` for the recurring upstream merge and release gate.
+- Keep `VM_DEPLOYMENT.md` as the canonical English VM guide and `VM_DEPLOYMENT.zh-CN.md` as its Chinese translation; the legacy `docs/vm-deployment.md` is only a compatibility pointer.
 - Do not record host models, hostnames, account names, local paths, network topology or addresses, interface names, storage mount points, or live workload inventory in tracked files or commit metadata. Supply host-specific values only through private local parameters.
 - Do not create a production USB allowlist, claim firmware visibility, or upgrade firmware until the exact identity and AT path can be verified locally.

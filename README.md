@@ -25,7 +25,7 @@
 **English** | [العربية](docs/README.ar.md) | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md) | [Français](docs/README.fr.md) | [Русский](docs/README.ru.md) | [Español](docs/README.es.md) | [日本語](docs/README.ja.md)
 
 > [!IMPORTANT]
-> Hardened fork: remote installation, upstream container images, plugins, Export Proxy, and runtime self-update are disabled; release and Docker workflows are fail-closed. Pushes and pull requests build short-lived, read-only security candidates from committed SHAs using [the security workflow](docs/security-hardening.md); production uses [the dedicated VM procedure](docs/vm-deployment.md).
+> Hardened fork: remote installation, upstream container images, plugins, Export Proxy, and runtime self-update are disabled; release and Docker workflows are fail-closed. Pushes and pull requests build short-lived, read-only security candidates from committed SHAs using [the security workflow](docs/security-hardening.md); production uses [the dedicated VM procedure](VM_DEPLOYMENT.md).
 
 Vocat is an open-source web control panel and engineering toolkit for Quectel EC20/EC25-class cellular modems. It combines modem discovery, live radio status, AT and USSD terminals, SMS, WiFi Calling, eSIM management, network selection, proxy routing, notifications, audit logs, and controlled build and deployment workflows in one self-contained service.
 
@@ -91,7 +91,7 @@ unset VOCAT_BOOTSTRAP_PASSWORD
 docker compose up -d
 ```
 
-See [security hardening](docs/security-hardening.md) and [VM deployment](docs/vm-deployment.md).
+See [security hardening](docs/security-hardening.md) and [VM deployment](VM_DEPLOYMENT.md).
 
 ### USB SIM readers
 

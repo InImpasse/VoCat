@@ -29,7 +29,7 @@
 
 ## Current Scope
 
-- The latest reviewed upstream intake is `upstream/master@be01a1a90c642d6a011429b4efafa31b1bd5aadd`; its Telegram menu refactor was integrated through the required temporary merge branch after the complete security gate passed.
+- The latest reviewed upstream intake is `upstream/master@96ebbc2f9c192d0759240b6228834b1956e71c86`; its modem discovery, PC/SC, and SMS fixes were integrated through the required temporary merge branch after the complete security gate passed.
 - The supply-chain batch pins build and scanner images, fixes the known `nanoid` advisory, and adds a committed-source release gate. It includes normal/race tests, vet, npm audits, secret scanning, source/binary Go vulnerability scans, source/binary SBOMs, build metadata, and whole-artifact checksums.
 - Preserve three reviewable batches: build chain, authentication/API, and deployment. Keep each fix with its regression test.
 - See `docs/security-hardening.md` for the recurring upstream merge and release gate.

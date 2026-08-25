@@ -152,7 +152,8 @@ for command_name in python3 qemu-system-x86_64 qemu-img virsh virt-install swtpm
 done
 ((missing == 0)) || die 'required KVM tools are not installed'
 
-qemu-system-x86_64 -spice help >/dev/null 2>&1 ||
+spice_help=$(qemu-system-x86_64 -spice help 2>&1 || true)
+grep -Fqx 'spice options:' <<<"$spice_help" ||
   die 'QEMU SPICE backend is unavailable; install qemu-system-modules-spice'
 
 [[ -c /dev/kvm ]] || die '/dev/kvm is unavailable'

@@ -288,9 +288,12 @@ to the guest.
 ## 8. Optional DJI USB passthrough
 
 USB acceptance is separate from application deployment. The current hardened
-enrollment requires exactly one `2ca3:4006` device with both a stable USB serial
-and a stable udev `ID_PATH`. A device without a stable serial is intentionally
-rejected; do not weaken the allowlist to VID/PID-only matching.
+enrollment accepts all connected `2ca3:4006` devices. Each device must have a
+unique, stable udev `ID_PATH`. A USB serial is optional because some reviewed
+devices do not expose one; when present, it is an additional required match.
+Serial-less devices are therefore bound to their enrolled physical USB ports.
+Moving one to another port is rejected. Never weaken the allowlist to
+VID/PID-only matching.
 
 List matching sysfs names without printing identifiers:
 
@@ -302,17 +305,21 @@ for device_path in /sys/bus/usb/devices/*; do
 done
 ```
 
-With exactly one reviewed `<USB_SYSNAME>`:
+To discover and enroll every currently connected matching device:
 
 ```bash
-sudo ./scripts/configure-dji-usb-passthrough.sh --check --sysname <USB_SYSNAME>
-sudo ./scripts/configure-dji-usb-passthrough.sh --dry-run --sysname <USB_SYSNAME>
-sudo ./scripts/configure-dji-usb-passthrough.sh --apply --sysname <USB_SYSNAME>
+sudo ./scripts/configure-dji-usb-passthrough.sh --check
+sudo ./scripts/configure-dji-usb-passthrough.sh --dry-run
+sudo ./scripts/configure-dji-usb-passthrough.sh --apply
 ```
 
-The script stores the real identity only in a root-only host file, hotplugs one
-managed USB hostdev, and rejects extra USB devices and PCI/xHCI passthrough.
-Validate cold boot, hotplug, unplug/replug, and VM restart before modem testing.
+Use repeated `--sysname` only to enroll an explicit subset. The script stores
+real identities only in a root-only host file, assigns independent aliases and
+recoverable state to every enrolled managed USB hostdev, and rejects duplicate
+paths, unexpected aliases, and PCI/xHCI passthrough. Run `--apply` again after
+adding a new physical device; already enrolled devices hotplug automatically.
+Validate each device independently after cold boot, hotplug, unplug/replug, and
+VM restart before modem testing.
 
 Read firmware only during a maintenance window. Stop VoCat first and use
 `scripts/read-dji-firmware.sh`; it sends only `ATI`, `AT+CGMM`, and `AT+CGMR`.

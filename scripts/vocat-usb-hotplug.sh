@@ -5,9 +5,6 @@ umask 077
 
 readonly CONFIG_FILE=/etc/vocat/dji-usb.conf
 readonly STATE_DIR=/var/lib/vocat-usb
-readonly CURRENT_STATE=$STATE_DIR/current
-readonly PENDING_STATE=$STATE_DIR/pending
-readonly HOSTDEV_ALIAS=ua-vocat-dji-usb
 readonly LIBVIRT_URI=qemu:///system
 
 action=${1:-}
@@ -34,11 +31,12 @@ trap cleanup EXIT
 [[ $sysname =~ ^[0-9]+-[0-9]+([.][0-9]+)*$ ]] || die 'invalid USB device sysname'
 ((EUID == 0)) || die 'must run as root'
 
-for command_name in find flock install mv python3 rmdir stat udevadm virsh; do
+for command_name in find flock install mv python3 rmdir seq stat udevadm virsh wc; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is missing: $command_name"
 done
 [[ -f $CONFIG_FILE && ! -L $CONFIG_FILE ]] || die 'USB allowlist is not configured as a regular file'
-[[ $(stat -c '%U:%G:%a' "$CONFIG_FILE") == root:root:600 ]] || die 'USB allowlist must be root:root with mode 0600'
+[[ $(stat -c '%U:%G:%a:%h' "$CONFIG_FILE") == root:root:600:1 ]] ||
+  die 'USB allowlist must be root:root with mode 0600 and one link'
 
 config_value() {
   local key=$1
@@ -48,16 +46,51 @@ config_value() {
   printf '%s' "${values[0]}"
 }
 
-domain=$(config_value DOMAIN)
-vendor_id=$(config_value VENDOR_ID)
-product_id=$(config_value PRODUCT_ID)
-serial=$(config_value SERIAL)
-id_path=$(config_value ID_PATH)
+load_allowlist() {
+  schema=$(config_value SCHEMA)
+  domain=$(config_value DOMAIN)
+  vendor_id=$(config_value VENDOR_ID)
+  product_id=$(config_value PRODUCT_ID)
+  device_count=$(config_value DEVICE_COUNT)
 
-[[ $domain =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$ ]] || die 'invalid domain in allowlist'
-[[ $vendor_id == 2ca3 && $product_id == 4006 ]] || die 'allowlist is not the reviewed DJI 2ca3:4006 device composition'
-[[ $serial =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || die 'device serial contains unsupported characters'
-[[ $id_path =~ ^[A-Za-z0-9._:/+-]{1,256}$ ]] || die 'device ID_PATH contains unsupported characters'
+  [[ $schema == 2 ]] || die 'allowlist schema is unsupported'
+  [[ $domain =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$ ]] || die 'invalid domain in allowlist'
+  [[ $vendor_id == 2ca3 && $product_id == 4006 ]] || die 'allowlist is not the reviewed DJI 2ca3:4006 device composition'
+  [[ $device_count =~ ^[1-9][0-9]{0,2}$ ]] && ((device_count <= 255)) ||
+    die 'allowlist must contain between 1 and 255 devices'
+
+  serials=()
+  id_paths=()
+  for slot in $(seq 1 "$device_count"); do
+    serial=$(config_value "DEVICE_${slot}_SERIAL")
+    id_path=$(config_value "DEVICE_${slot}_ID_PATH")
+    [[ -z $serial || $serial =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || die 'device serial contains unsupported characters'
+    [[ $id_path =~ ^[A-Za-z0-9._:/+-]{1,256}$ ]] || die 'device ID_PATH contains unsupported characters'
+    serials+=("$serial")
+    id_paths+=("$id_path")
+  done
+  declare -A seen_paths=()
+  for id_path in "${id_paths[@]}"; do
+    [[ -z ${seen_paths[$id_path]+x} ]] || die 'allowlist physical paths must be unique'
+    seen_paths[$id_path]=1
+  done
+  expected_lines=$((5 + device_count * 2))
+  [[ $(wc -l <"$CONFIG_FILE") == "$expected_lines" ]] || die 'allowlist contains unexpected or missing entries'
+}
+load_allowlist
+
+select_slot() {
+  local selected=$1
+  ((selected >= 1 && selected <= device_count)) || return 1
+  slot=$selected
+  serial=${serials[selected - 1]}
+  id_path=${id_paths[selected - 1]}
+  HOSTDEV_ALIAS=ua-vocat-dji-usb-$selected
+  SLOT_STATE=$STATE_DIR/slot-$selected
+  CURRENT_STATE=$SLOT_STATE/current
+  PENDING_STATE=$SLOT_STATE/pending
+}
+select_slot 1
 
 [[ -d $STATE_DIR && ! -L $STATE_DIR ]] || die 'USB passthrough state directory is missing or unsafe'
 [[ $(stat -c '%U:%G:%a' "$STATE_DIR") == root:root:700 ]] || die 'USB passthrough state directory must be root:root with mode 0700'
@@ -72,6 +105,12 @@ property_value() {
   awk -F= -v wanted="$key" '$1 == wanted { print substr($0, index($0, "=") + 1); exit }' <<<"$properties"
 }
 
+identity_matches() {
+  local candidate_serial=$1
+  local candidate_path=$2
+  [[ $candidate_path == "$id_path" && ( -z $serial || $candidate_serial == "$serial" ) ]]
+}
+
 matches_allowlist() {
   local candidate=$1
   local sysfs_path=/sys/bus/usb/devices/$candidate
@@ -83,7 +122,7 @@ matches_allowlist() {
   properties=$(udevadm info --query=property --path="$sysfs_path" 2>/dev/null) || return 1
   candidate_serial=$(property_value "$properties" ID_SERIAL_SHORT)
   candidate_path=$(property_value "$properties" ID_PATH)
-  [[ $candidate_serial == "$serial" && $candidate_path == "$id_path" ]]
+  identity_matches "$candidate_serial" "$candidate_path"
 }
 
 alias_present() {
@@ -107,23 +146,35 @@ assert_managed_passthrough() {
   local xml_file=$1
   local scope=$2
   local require_one=$3
-  python3 - "$xml_file" "$HOSTDEV_ALIAS" "$vendor_id" "$product_id" "$scope" "$require_one" <<'PY'
+  python3 - "$xml_file" "$HOSTDEV_ALIAS" "$vendor_id" "$product_id" "$scope" "$require_one" "$device_count" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
-xml_file, alias_name, vendor_id, product_id, scope, require_one = sys.argv[1:]
+xml_file, alias_name, vendor_id, product_id, scope, require_one, device_count = sys.argv[1:]
 root = ET.parse(xml_file).getroot()
 hostdevs = [root] if root.tag == "hostdev" else root.findall("./devices/hostdev")
+device_count = int(device_count)
+
+def managed_alias(name):
+    prefix = "ua-vocat-dji-usb-"
+    suffix = name.removeprefix(prefix)
+    return name.startswith(prefix) and suffix.isascii() and suffix.isdigit() and 1 <= int(suffix) <= device_count
 if require_one == "yes" and len(hostdevs) != 1:
     raise SystemExit("trusted USB state must contain exactly one hostdev")
-if len(hostdevs) > 1:
+if len(hostdevs) > device_count:
     raise SystemExit("unexpected extra hostdev passthrough is present")
+seen = set()
 for hostdev in hostdevs:
-    alias = hostdev.find("alias")
-    source = hostdev.find("source")
-    vendor = source.find("vendor") if source is not None else None
-    product = source.find("product") if source is not None else None
-    address = source.find("address") if source is not None else None
+    aliases = hostdev.findall("alias")
+    sources = hostdev.findall("source")
+    alias = aliases[0] if len(aliases) == 1 else None
+    source = sources[0] if len(sources) == 1 else None
+    vendors = source.findall("vendor") if source is not None else []
+    products = source.findall("product") if source is not None else []
+    addresses = source.findall("address") if source is not None else []
+    vendor = vendors[0] if len(vendors) == 1 else None
+    product = products[0] if len(products) == 1 else None
+    address = addresses[0] if len(addresses) == 1 else None
     startup_policy = source.get("startupPolicy") if source is not None else None
     if scope == "live":
         startup_ok = startup_policy in (None, "optional")
@@ -134,21 +185,40 @@ for hostdev in hostdevs:
         device = int(address.get("device", ""), 10) if address is not None else -1
     except ValueError:
         bus = device = -1
+    actual_alias = alias.get("name", "") if alias is not None else ""
+    alias_ok = actual_alias == alias_name if require_one == "yes" else managed_alias(actual_alias)
     if (
-        hostdev.get("mode") != "subsystem"
+        set(hostdev.attrib) != {"mode", "type", "managed"}
+        or hostdev.get("mode") != "subsystem"
         or hostdev.get("type") != "usb"
         or hostdev.get("managed") != "yes"
         or alias is None
-        or alias.get("name") != alias_name
+        or alias.attrib != {"name": actual_alias}
+        or list(alias)
+        or not alias_ok
+        or actual_alias in seen
         or source is None
+        or set(source.attrib) - {"startupPolicy"}
+        or [child.tag for child in source].count("vendor") != 1
+        or [child.tag for child in source].count("product") != 1
+        or [child.tag for child in source].count("address") != 1
+        or any(child.tag not in {"vendor", "product", "address"} for child in source)
         or not startup_ok
         or vendor is None
-        or vendor.get("id", "").lower() != f"0x{vendor_id}"
+        or {key: value.lower() for key, value in vendor.attrib.items()} != {"id": f"0x{vendor_id}"}
+        or list(vendor)
         or product is None
-        or product.get("id", "").lower() != f"0x{product_id}"
+        or {key: value.lower() for key, value in product.attrib.items()} != {"id": f"0x{product_id}"}
+        or list(product)
+        or address is None
+        or set(address.attrib) != {"bus", "device"}
+        or list(address)
         or not (1 <= bus <= 255 and 1 <= device <= 255)
+        or any(child.tag not in {"source", "alias", "address"} for child in hostdev)
+        or any(item.get("type") != "usb" for item in hostdev.findall("address"))
     ):
         raise SystemExit("unauthorized USB or PCI/controller passthrough is present")
+    seen.add(actual_alias)
 PY
 }
 
@@ -158,7 +228,7 @@ assert_passthrough_identity() {
   local expected_bus=$3
   local expected_device=$4
 
-  assert_managed_passthrough "$xml_file" "$scope" yes || return 1
+  assert_managed_passthrough "$xml_file" "$scope" no || return 1
   python3 - "$xml_file" "$HOSTDEV_ALIAS" "$vendor_id" "$product_id" "$scope" "$expected_bus" "$expected_device" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
@@ -166,8 +236,9 @@ import xml.etree.ElementTree as ET
 xml_file, alias_name, vendor_id, product_id, scope, expected_bus, expected_device = sys.argv[1:]
 root = ET.parse(xml_file).getroot()
 hostdevs = [root] if root.tag == "hostdev" else root.findall("./devices/hostdev")
+hostdevs = [item for item in hostdevs if item.find("alias") is not None and item.find("alias").get("name") == alias_name]
 if len(hostdevs) != 1:
-    raise SystemExit("complete USB identity requires exactly one hostdev")
+    raise SystemExit("complete USB identity requires exactly one matching hostdev")
 try:
     expected_address = (int(expected_bus, 10), int(expected_device, 10))
 except ValueError:
@@ -352,13 +423,49 @@ recover_pending_state() {
   remove_state_directory "$PENDING_STATE" || die 'failed to clear recovered pending USB state'
 }
 
+for candidate_slot in $(seq 1 "$device_count"); do
+  select_slot "$candidate_slot"
+  [[ -d $SLOT_STATE && ! -L $SLOT_STATE ]] || die 'USB slot state directory is missing or unsafe'
+  [[ $(stat -c '%U:%G:%a' "$SLOT_STATE") == root:root:700 ]] || die 'USB slot state directory must be root:root with mode 0700'
+  if [[ -e $PENDING_STATE || -L $PENDING_STATE ]]; then
+    [[ $action != check ]] || die 'a pending USB transaction requires recovery before a read-only check can pass'
+    recover_pending_state
+  fi
+done
+
 validate_domain_passthrough || die 'unauthorized hostdev passthrough is present; refusing USB operation'
 
-if [[ -e $PENDING_STATE || -L $PENDING_STATE ]]; then
-  [[ $action != check ]] || die 'a pending USB transaction requires recovery before a read-only check can pass'
-  recover_pending_state
-  validate_domain_passthrough || die 'hostdev validation failed after pending-state recovery'
+for candidate_slot in $(seq 1 "$device_count"); do
+  select_slot "$candidate_slot"
+  refresh_alias_status || die 'cannot reconcile a managed USB slot with libvirt state'
+  if [[ -e $CURRENT_STATE || -L $CURRENT_STATE ]]; then
+    validate_state_directory "$CURRENT_STATE" || die 'current USB state is incomplete or unsafe; manual review is required'
+    [[ $alias_in_config == true ]] || die 'trusted USB state is missing from persistent domain XML'
+  elif [[ $alias_in_config == true || $alias_in_live == true ]]; then
+    die 'domain has a managed VoCat USB alias without trusted local state'
+  fi
+done
+
+event_slots=()
+if [[ $action == attach || $action == check ]]; then
+  for candidate_slot in $(seq 1 "$device_count"); do
+    select_slot "$candidate_slot"
+    matches_allowlist "$sysname" && event_slots+=("$candidate_slot")
+  done
+  ((${#event_slots[@]} == 1)) || die 'USB event must match exactly one path-bound allowlist entry'
+else
+  for candidate_slot in $(seq 1 "$device_count"); do
+    select_slot "$candidate_slot"
+    if [[ -f $CURRENT_STATE/sysname && ! -L $CURRENT_STATE/sysname && $(<"$CURRENT_STATE/sysname") == "$sysname" ]]; then
+      event_slots+=("$candidate_slot")
+    fi
+  done
+  ((${#event_slots[@]} <= 1)) || die 'USB detach event matches multiple trusted states'
+  if ((${#event_slots[@]} == 0)); then
+    exit 0
+  fi
 fi
+select_slot "${event_slots[0]}"
 
 current_state_exists=false
 if [[ -e $CURRENT_STATE || -L $CURRENT_STATE ]]; then
@@ -396,7 +503,7 @@ if [[ $action == check || $action == attach ]]; then
       die 'USB bus or device number is outside the libvirt address range'
     validate_check_identity "$bus_number" "$device_number" ||
       die 'trusted USB state and libvirt hostdev addresses do not match the connected allowlisted device'
-    printf 'USB allowlist check passed for %s:%s; serial and physical path were matched but not displayed.\n' "$vendor_id" "$product_id"
+    printf 'USB allowlist check passed for slot %s (%s:%s); physical identity was matched but not displayed.\n' "$slot" "$vendor_id" "$product_id"
     exit 0
   fi
 fi
@@ -490,4 +597,4 @@ if ! mv -T -- "$PENDING_STATE" "$CURRENT_STATE"; then
   die 'USB state commit and rollback failed; the root-only pending marker was retained'
 fi
 
-printf 'Attached allowlisted DJI USB device %s:%s to domain %s; serial and physical path were not logged.\n' "$vendor_id" "$product_id" "$domain"
+printf 'Attached path-bound DJI USB slot %s (%s:%s) to domain %s; production identity was not logged.\n' "$slot" "$vendor_id" "$product_id" "$domain"

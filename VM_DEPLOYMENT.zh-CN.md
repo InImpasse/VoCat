@@ -268,9 +268,11 @@ sudo systemctl reload nginx
 
 ## 8. 可选 DJI USB 直通
 
-USB 验收与应用部署是两个独立门禁。当前加固登记要求恰好一个 `2ca3:4006`
-设备，同时具有稳定 USB 序列号和稳定 udev `ID_PATH`。没有稳定序列号的设备会
-被有意拒绝；不得把白名单弱化为只匹配 VID/PID。
+USB 验收与应用部署是两个独立门禁。当前加固登记允许所有已连接的 `2ca3:4006`
+设备；每台都必须具有唯一且稳定的 udev `ID_PATH`。部分已审查设备不提供 USB
+序列号，因此序列号可以为空；设备一旦提供序列号，后续热插拔就必须同时匹配。
+无序列号设备会绑定到登记时的物理 USB 端口，换到其他端口会被拒绝。不得把
+白名单弱化为只匹配 VID/PID。
 
 不输出身份信息，只列出匹配的 sysfs 名称：
 
@@ -282,17 +284,19 @@ for device_path in /sys/bus/usb/devices/*; do
 done
 ```
 
-确认只有一个 `<USB_SYSNAME>` 后：
+自动发现并登记当前全部匹配设备：
 
 ```bash
-sudo ./scripts/configure-dji-usb-passthrough.sh --check --sysname <USB_SYSNAME>
-sudo ./scripts/configure-dji-usb-passthrough.sh --dry-run --sysname <USB_SYSNAME>
-sudo ./scripts/configure-dji-usb-passthrough.sh --apply --sysname <USB_SYSNAME>
+sudo ./scripts/configure-dji-usb-passthrough.sh --check
+sudo ./scripts/configure-dji-usb-passthrough.sh --dry-run
+sudo ./scripts/configure-dji-usb-passthrough.sh --apply
 ```
 
-脚本只把真实身份写入宿主 root-only 文件，只热插拔一个受管理 USB hostdev，
-并拒绝额外 USB 设备及 PCI/xHCI 直通。开始调制解调器测试前，必须验证冷启动、
-热插拔、拔出/重插和 VM 重启。
+仅需登记部分设备时才重复传入 `--sysname`。脚本只把真实身份写入宿主 root-only
+文件，为每个已登记的受管理 USB hostdev 分配独立 alias 和可恢复状态，并拒绝
+重复路径、意外 alias 及 PCI/xHCI 直通。新增物理设备后需要再次运行 `--apply`；
+已登记设备后续会自动热插拔。开始调制解调器测试前，必须对每台设备分别验证
+冷启动、热插拔、拔出/重插和 VM 重启。
 
 固件只在维护窗读取。先停止 VoCat，再使用 `scripts/read-dji-firmware.sh`；它只
 发送 `ATI`、`AT+CGMM` 和 `AT+CGMR`。首轮部署不升级固件。

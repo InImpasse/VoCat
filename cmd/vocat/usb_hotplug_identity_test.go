@@ -11,8 +11,9 @@ import (
 
 func TestUSBHotplugIdentityValidatorBindsAddressAndIdentity(t *testing.T) {
 	validatorPath := extractUSBHotplugIdentityValidator(t)
-	validState := usbIdentityHostdev("2ca3", "4006", "ua-vocat-dji-usb", 1, 2, true)
-	validLive := usbIdentityDomain(usbIdentityHostdev("2ca3", "4006", "ua-vocat-dji-usb", 1, 2, false))
+	validState := usbIdentityHostdev("2ca3", "4006", "ua-vocat-dji-usb-1", 1, 2, true)
+	validPeer := usbIdentityHostdev("2ca3", "4006", "ua-vocat-dji-usb-2", 1, 3, true)
+	validLive := usbIdentityDomain(usbIdentityHostdev("2ca3", "4006", "ua-vocat-dji-usb-1", 1, 2, false))
 
 	tests := []struct {
 		name        string
@@ -22,16 +23,17 @@ func TestUSBHotplugIdentityValidatorBindsAddressAndIdentity(t *testing.T) {
 	}{
 		{name: "trusted state", xml: validState, scope: "state", wantSuccess: true},
 		{name: "trusted inactive domain", xml: usbIdentityDomain(validState), scope: "config", wantSuccess: true},
+		{name: "trusted inactive domain with peer slot", xml: usbIdentityDomain(validState + validPeer), scope: "config", wantSuccess: true},
 		{name: "trusted live domain", xml: validLive, scope: "live", wantSuccess: true},
-		{name: "bus drift", xml: usbIdentityDomain(usbIdentityHostdev("2ca3", "4006", "ua-vocat-dji-usb", 3, 2, true)), scope: "config"},
-		{name: "device drift", xml: usbIdentityDomain(usbIdentityHostdev("2ca3", "4006", "ua-vocat-dji-usb", 1, 4, true)), scope: "config"},
-		{name: "vendor drift", xml: usbIdentityDomain(usbIdentityHostdev("ffff", "4006", "ua-vocat-dji-usb", 1, 2, true)), scope: "config"},
-		{name: "product drift", xml: usbIdentityDomain(usbIdentityHostdev("2ca3", "ffff", "ua-vocat-dji-usb", 1, 2, true)), scope: "config"},
+		{name: "bus drift", xml: usbIdentityDomain(usbIdentityHostdev("2ca3", "4006", "ua-vocat-dji-usb-1", 3, 2, true)), scope: "config"},
+		{name: "device drift", xml: usbIdentityDomain(usbIdentityHostdev("2ca3", "4006", "ua-vocat-dji-usb-1", 1, 4, true)), scope: "config"},
+		{name: "vendor drift", xml: usbIdentityDomain(usbIdentityHostdev("ffff", "4006", "ua-vocat-dji-usb-1", 1, 2, true)), scope: "config"},
+		{name: "product drift", xml: usbIdentityDomain(usbIdentityHostdev("2ca3", "ffff", "ua-vocat-dji-usb-1", 1, 2, true)), scope: "config"},
 		{name: "alias drift", xml: usbIdentityDomain(usbIdentityHostdev("2ca3", "4006", "ua-other", 1, 2, true)), scope: "config"},
-		{name: "duplicate alias", xml: usbIdentityDomain(strings.Replace(validState, `</hostdev>`, `<alias name="ua-vocat-dji-usb"/></hostdev>`, 1)), scope: "config"},
+		{name: "duplicate alias element", xml: usbIdentityDomain(strings.Replace(validState, `</hostdev>`, `<alias name="ua-vocat-dji-usb-1"/></hostdev>`, 1)), scope: "config"},
 		{name: "duplicate source address", xml: usbIdentityDomain(strings.Replace(validState, `</source>`, `<address bus="1" device="2"/></source>`, 1)), scope: "config"},
 		{name: "missing hostdev", xml: usbIdentityDomain(""), scope: "config"},
-		{name: "extra hostdev", xml: usbIdentityDomain(validState + validState), scope: "config"},
+		{name: "duplicate slot hostdev", xml: usbIdentityDomain(validState + validState), scope: "config"},
 	}
 
 	for _, test := range tests {
@@ -40,7 +42,7 @@ func TestUSBHotplugIdentityValidatorBindsAddressAndIdentity(t *testing.T) {
 			if err := os.WriteFile(xmlPath, []byte(test.xml), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			command := exec.Command("python3", validatorPath, xmlPath, "ua-vocat-dji-usb", "2ca3", "4006", test.scope, "1", "2")
+			command := exec.Command("python3", validatorPath, xmlPath, "ua-vocat-dji-usb-1", "2ca3", "4006", test.scope, "1", "2")
 			output, err := command.CombinedOutput()
 			if test.wantSuccess && err != nil {
 				t.Fatalf("validator rejected matching identity: %v\n%s", err, output)

@@ -36,3 +36,4 @@
 - Keep `VM_DEPLOYMENT.md` as the canonical English VM guide and `VM_DEPLOYMENT.zh-CN.md` as its Chinese translation; the legacy `docs/vm-deployment.md` is only a compatibility pointer.
 - Do not record host models, hostnames, account names, local paths, network topology or addresses, interface names, storage mount points, or live workload inventory in tracked files or commit metadata. Supply host-specific values only through private local parameters.
 - Do not create a production USB allowlist, claim firmware visibility, or upgrade firmware until the exact identity and AT path can be verified locally.
+- Serial-less DJI passthrough may enroll all connected reviewed devices when each is bound to a unique stable `ID_PATH`; retain independent managed aliases and transactional state, require a serial match whenever one is exposed, and never fall back to VID/PID-only identity.

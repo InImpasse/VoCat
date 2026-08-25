@@ -399,7 +399,8 @@ def validate(xml_path, scope):
                            for element in root.iter()), "custom QEMU command-line arguments are forbidden")
 
     hostdevs = root.findall("./devices/hostdev")
-    scoped_require(len(hostdevs) <= 1, "unexpected extra hostdev passthrough is present")
+    scoped_require(len(hostdevs) <= 255, "unexpected extra hostdev passthrough is present")
+    seen_hostdev_aliases = set()
     signatures = []
     for hostdev in hostdevs:
         source = hostdev.find("source")
@@ -414,11 +415,17 @@ def validate(xml_path, scope):
             device = int(address.get("device", ""), 10) if address is not None else -1
         except ValueError:
             bus = device = -1
+        alias_name = alias.get("name", "") if alias is not None else ""
+        alias_prefix = "ua-vocat-dji-usb-"
+        alias_suffix = alias_name.removeprefix(alias_prefix)
+        managed_alias = (alias_name.startswith(alias_prefix) and alias_suffix.isascii() and
+                         alias_suffix.isdigit() and 1 <= int(alias_suffix) <= 255)
         scoped_require(set(hostdev.attrib) == {"mode", "type", "managed"} and
                        hostdev.get("mode") == "subsystem" and hostdev.get("type") == "usb" and
                        hostdev.get("managed") == "yes" and source is not None and alias is not None and
                        len(hostdev.findall("source")) == 1 and len(hostdev.findall("alias")) == 1 and
                        all(child.tag in {"source", "alias", "address"} for child in hostdev) and
+                       alias.attrib == {"name": alias.get("name", "")} and not list(alias) and
                        startup_ok and set(source.attrib) <= {"startupPolicy"} and
                        [child.tag for child in source].count("vendor") == 1 and
                        [child.tag for child in source].count("product") == 1 and
@@ -428,13 +435,15 @@ def validate(xml_path, scope):
                        product is not None and product.attrib == {"id": "0x4006"} and
                        address is not None and set(address.attrib) == {"bus", "device"} and
                        1 <= bus <= 255 and 1 <= device <= 255 and
-                       alias.attrib == {"name": "ua-vocat-dji-usb"},
+                       managed_alias and alias_name not in seen_hostdev_aliases,
                        "unauthorized USB or PCI/controller passthrough is present")
+        seen_hostdev_aliases.add(alias_name)
         guest_addresses = hostdev.findall("address")
         scoped_require(len(guest_addresses) <= 1 and
                        all(item.get("type") == "usb" for item in guest_addresses),
                        "USB hostdev has an unauthorized guest address")
-        signatures.append(("2ca3", "4006", bus, device, "ua-vocat-dji-usb"))
+        signatures.append(("2ca3", "4006", bus, device, alias_name))
+    signatures.sort()
     return tuple(signatures)
 
 inactive_hostdevs = validate(inactive_xml_path, "inactive")

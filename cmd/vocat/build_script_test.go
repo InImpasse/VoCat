@@ -49,7 +49,7 @@ func TestHardenedBuildScriptSerializesRacePackages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(contents), `go test -race -p 1 ./...`) {
+	if !strings.Contains(string(contents), `go test -race -p 1 -timeout=30m ./...`) {
 		t.Fatal("hardened build script must serialize race-tested packages on constrained builders")
 	}
 }

@@ -356,6 +356,8 @@ func TestVMProfileRejectsStorageAndDeviceDrift(t *testing.T) {
 		`len(graphics_devices) == 1`,
 		`not root.findall("./devices/filesystem")`,
 		`inactive_hostdevs == live_hostdevs`,
+		`len(hostdevs) <= 255`,
+		`alias_prefix = "ua-vocat-dji-usb-"`,
 		`CD-ROM media must be ejected unless --iso is supplied`,
 		`"backing-filename", "full-backing-filename", "data-file"`,
 		`--iso "$iso_path" --vcpus "$vcpus"`,
@@ -427,6 +429,20 @@ func TestVMProfilePythonValidatorRejectsLiveAndCDROMDrift(t *testing.T) {
 	arbitraryFileCDROM := fmt.Sprintf(`<disk type="file" device="cdrom"><driver name="qemu" type="raw"/><source file="%s"/><target dev="sda" bus="sata"/><readonly/></disk>`, arbitraryPath)
 	liveWithQEMUArgs := strings.Replace(live, `<domain type="kvm">`, `<domain type="kvm" xmlns:qemu="http://libvirt.org/schemas/domain/qemu/1.0">`, 1)
 	liveWithQEMUArgs = strings.Replace(liveWithQEMUArgs, "</domain>", `<qemu:commandline><qemu:arg value="-device"/></qemu:commandline></domain>`, 1)
+	secondInactiveUSB := vmUSBHostdev("ua-vocat-dji-usb-2", 1, 3, true)
+	secondLiveUSB := vmUSBHostdev("ua-vocat-dji-usb-2", 1, 3, false)
+	thirdInactiveUSB := vmUSBHostdev("ua-vocat-dji-usb-3", 1, 4, true)
+	thirdLiveUSB := vmUSBHostdev("ua-vocat-dji-usb-3", 1, 4, false)
+	inactiveWithTwoUSB := addVMDevice(inactive, secondInactiveUSB)
+	liveWithTwoUSBReordered := strings.Replace(live,
+		vmUSBHostdev("ua-vocat-dji-usb-1", 1, 2, false),
+		secondLiveUSB+vmUSBHostdev("ua-vocat-dji-usb-1", 1, 2, false), 1)
+	inactiveWithThreeUSB := addVMDevice(inactiveWithTwoUSB, thirdInactiveUSB)
+	liveWithThreeUSB := addVMDevice(liveWithTwoUSBReordered, thirdLiveUSB)
+	duplicateAliasUSB := addVMDevice(inactive,
+		vmUSBHostdev("ua-vocat-dji-usb-1", 1, 3, true))
+	invalidAliasUSB := addVMDevice(inactiveWithTwoUSB,
+		vmUSBHostdev("ua-vocat-dji-usb-256", 1, 4, true))
 
 	tests := []struct {
 		name        string
@@ -440,11 +456,16 @@ func TestVMProfilePythonValidatorRejectsLiveAndCDROMDrift(t *testing.T) {
 		{name: "valid libvirt install transition", inactiveXML: ejectedInactive, liveXML: live, expectedISO: isoPath, wantSuccess: true},
 		{name: "valid ejected profile", inactiveXML: ejectedInactive, liveXML: ejectedLive, wantSuccess: true},
 		{name: "valid normalized live ejected profile", inactiveXML: ejectedInactive, liveXML: ejectedLiveWithoutDriverType, wantSuccess: true},
+		{name: "valid two USB devices regardless of XML order", inactiveXML: inactiveWithTwoUSB, liveXML: liveWithTwoUSBReordered, expectedISO: isoPath, wantSuccess: true},
+		{name: "valid three USB devices", inactiveXML: inactiveWithThreeUSB, liveXML: liveWithThreeUSB, expectedISO: isoPath, wantSuccess: true},
 		{name: "attached live media without raw driver", inactiveXML: inactive, liveXML: attachedLiveWithoutDriverType, expectedISO: isoPath},
 		{name: "live installer media ejected", inactiveXML: ejectedInactive, liveXML: ejectedLive, expectedISO: isoPath},
 		{name: "inactive vCPU drift", inactiveXML: strings.Replace(inactive, "<vcpu>2</vcpu>", "<vcpu>3</vcpu>", 1), liveXML: live, expectedISO: isoPath},
 		{name: "live memory drift", inactiveXML: inactive, liveXML: strings.Replace(live, "<memory unit=\"KiB\">2097152</memory>", "<memory unit=\"KiB\">3145728</memory>", 1), expectedISO: isoPath},
 		{name: "live-only PCI hostdev", inactiveXML: inactive, liveXML: addVMDevice(live, `<hostdev mode="subsystem" type="pci" managed="yes"><source><address domain="0" bus="0" slot="20" function="0"/></source></hostdev>`), expectedISO: isoPath},
+		{name: "duplicate managed USB alias", inactiveXML: duplicateAliasUSB, liveXML: live, expectedISO: isoPath},
+		{name: "out-of-range USB alias", inactiveXML: invalidAliasUSB, liveXML: liveWithTwoUSBReordered, expectedISO: isoPath},
+		{name: "inactive and live USB count drift", inactiveXML: inactiveWithTwoUSB, liveXML: live, expectedISO: isoPath},
 		{name: "live-only filesystem", inactiveXML: inactive, liveXML: addVMDevice(live, `<filesystem type="mount"><source dir="/"/><target dir="host"/></filesystem>`), expectedISO: isoPath},
 		{name: "live-only redirection", inactiveXML: inactive, liveXML: addVMDevice(live, `<redirdev bus="usb" type="spicevmc"/>`), expectedISO: isoPath},
 		{name: "live-only smartcard", inactiveXML: inactive, liveXML: addVMDevice(live, `<smartcard mode="passthrough" type="spicevmc"/>`), expectedISO: isoPath},
@@ -499,10 +520,6 @@ func assertVMProfileValidator(t *testing.T, validatorPath, diskPath, inactiveXML
 }
 
 func vmProfileXML(diskPath, isoPath string, inactive bool) string {
-	startupPolicy := ""
-	if inactive {
-		startupPolicy = ` startupPolicy="optional"`
-	}
 	cdrom := `<disk type="file" device="cdrom"><driver name="qemu" type="raw"/><target dev="sda" bus="sata"/><readonly/></disk>`
 	if isoPath != "" {
 		cdrom = fmt.Sprintf(`<disk type="file" device="cdrom"><driver name="qemu" type="raw"/><source file="%s"/><target dev="sda" bus="sata"/><readonly/></disk>`, isoPath)
@@ -525,9 +542,18 @@ func vmProfileXML(diskPath, isoPath string, inactive bool) string {
     <tpm model="tpm-crb"><backend type="emulator" version="2.0"/></tpm>
     <channel type="unix"><target type="virtio" name="org.qemu.guest_agent.0"/></channel>
     <graphics type="spice" listen="127.0.0.1"/>
-    <hostdev mode="subsystem" type="usb" managed="yes"><source%s><vendor id="0x2ca3"/><product id="0x4006"/><address bus="1" device="2"/></source><alias name="ua-vocat-dji-usb"/></hostdev>
-  </devices>
-</domain>`, diskPath, cdrom, startupPolicy)
+	    %s
+	  </devices>
+	</domain>`, diskPath, cdrom, vmUSBHostdev("ua-vocat-dji-usb-1", 1, 2, inactive))
+}
+
+func vmUSBHostdev(alias string, bus, device int, inactive bool) string {
+	startupPolicy := ""
+	if inactive {
+		startupPolicy = ` startupPolicy="optional"`
+	}
+	return fmt.Sprintf(`<hostdev mode="subsystem" type="usb" managed="yes"><source%s><vendor id="0x2ca3"/><product id="0x4006"/><address bus="%d" device="%d"/></source><alias name="%s"/></hostdev>`,
+		startupPolicy, bus, device, alias)
 }
 
 func addVMDevice(domainXML, deviceXML string) string {

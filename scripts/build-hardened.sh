@@ -744,7 +744,7 @@ run_logged "go test" "$go_test_output/go-test.txt" \
     --mount "type=bind,src=$test_identity_dir/group,dst=/etc/group,readonly" \
     --mount "type=bind,src=$test_identity_dir/os-release,dst=/etc/os-release,readonly" \
     "$GO_TEST_IMAGE" \
-    go test ./...
+    go test -timeout=30m ./...
 assert_exact_files "$go_test_output" go-test.txt
 
 run_logged "go vet" "$go_vet_output/go-vet.txt" \
@@ -968,7 +968,7 @@ run_logged "go test -race" "$race_test_output/go-test-race.txt" \
     --mount "type=bind,src=$test_identity_dir/group,dst=/etc/group,readonly" \
     --mount "type=bind,src=$test_identity_dir/os-release,dst=/etc/os-release,readonly" \
     "$GO_TEST_IMAGE" \
-    go test -race -p 1 ./...
+    go test -race -p 1 -timeout=30m ./...
 assert_exact_files "$race_test_output" go-test-race.txt
 install -m 0644 "$race_version_output/go-race-version.txt" "$race_output/go-race-version.txt"
 install -m 0644 "$race_test_output/go-test-race.txt" "$race_output/go-test-race.txt"

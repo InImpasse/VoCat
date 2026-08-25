@@ -1,6 +1,6 @@
 # This public VID/PID match only starts the verifier. The verifier reads the
-# root-only allowlist and requires the exact serial plus ID_PATH before it can
-# attach anything. Never put those production identifiers in this rule.
+# root-only allowlist and requires an enrolled ID_PATH plus an optional serial
+# before it can attach anything. Never put production identifiers in this rule.
 ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="@VENDOR_ID@", ATTR{idProduct}=="@PRODUCT_ID@", TAG+="systemd", ENV{SYSTEMD_WANTS}+="vocat-usb-attach@%k.service"
 # USB remove events may no longer have readable sysfs attributes. PRODUCT is a
 # kernel uevent field; the detach handler still requires the recorded sysname.

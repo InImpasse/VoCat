@@ -36,7 +36,7 @@ func runBootstrapAdmin(args []string) error {
 	if len(adminUsername) < 1 || len(adminUsername) > 64 || strings.ContainsAny(adminUsername, "\r\n\t") {
 		return errors.New("bootstrap username must contain between 1 and 64 characters without control whitespace")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	database, err := store.Open(ctx, strings.TrimSpace(*databasePath))
 	if err != nil {

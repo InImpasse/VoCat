@@ -401,6 +401,21 @@ func TestVMProfilePythonValidatorRejectsLiveAndCDROMDrift(t *testing.T) {
 
 	inactive := vmProfileXML(diskPath, isoPath, true)
 	live := vmProfileXML(diskPath, isoPath, false)
+	liveWithCDROMIndex := strings.Replace(live,
+		fmt.Sprintf(`<source file="%s"/>`, isoPath),
+		fmt.Sprintf(`<source file="%s" index="1"/>`, isoPath), 1)
+	inactiveWithCDROMIndex := strings.Replace(inactive,
+		fmt.Sprintf(`<source file="%s"/>`, isoPath),
+		fmt.Sprintf(`<source file="%s" index="1"/>`, isoPath), 1)
+	liveWithInvalidCDROMIndex := strings.Replace(live,
+		fmt.Sprintf(`<source file="%s"/>`, isoPath),
+		fmt.Sprintf(`<source file="%s" index="invalid"/>`, isoPath), 1)
+	liveWithZeroCDROMIndex := strings.Replace(live,
+		fmt.Sprintf(`<source file="%s"/>`, isoPath),
+		fmt.Sprintf(`<source file="%s" index="0"/>`, isoPath), 1)
+	liveWithUnknownCDROMSourceAttribute := strings.Replace(live,
+		fmt.Sprintf(`<source file="%s"/>`, isoPath),
+		fmt.Sprintf(`<source file="%s" index="1" unexpected="value"/>`, isoPath), 1)
 	ejectedInactive := vmProfileXML(diskPath, "", true)
 	ejectedLive := vmProfileXML(diskPath, "", false)
 	blockCDROM := `<disk type="block" device="cdrom"><driver name="qemu" type="raw"/><source dev="/dev/sr0"/><target dev="sda" bus="sata"/><readonly/></disk>`
@@ -416,6 +431,7 @@ func TestVMProfilePythonValidatorRejectsLiveAndCDROMDrift(t *testing.T) {
 		wantSuccess bool
 	}{
 		{name: "valid installed profile", inactiveXML: inactive, liveXML: live, expectedISO: isoPath, wantSuccess: true},
+		{name: "valid libvirt live CD-ROM index", inactiveXML: inactive, liveXML: liveWithCDROMIndex, expectedISO: isoPath, wantSuccess: true},
 		{name: "valid libvirt install transition", inactiveXML: ejectedInactive, liveXML: live, expectedISO: isoPath, wantSuccess: true},
 		{name: "valid ejected profile", inactiveXML: ejectedInactive, liveXML: ejectedLive, wantSuccess: true},
 		{name: "live installer media ejected", inactiveXML: ejectedInactive, liveXML: ejectedLive, expectedISO: isoPath},
@@ -429,6 +445,10 @@ func TestVMProfilePythonValidatorRejectsLiveAndCDROMDrift(t *testing.T) {
 		{name: "live-only custom qemu command line", inactiveXML: inactive, liveXML: liveWithQEMUArgs, expectedISO: isoPath},
 		{name: "block CD-ROM", inactiveXML: replaceVMCDROM(inactive, blockCDROM), liveXML: replaceVMCDROM(live, blockCDROM), expectedISO: isoPath},
 		{name: "arbitrary file CD-ROM", inactiveXML: replaceVMCDROM(inactive, arbitraryFileCDROM), liveXML: replaceVMCDROM(live, arbitraryFileCDROM), expectedISO: isoPath},
+		{name: "inactive CD-ROM index", inactiveXML: inactiveWithCDROMIndex, liveXML: liveWithCDROMIndex, expectedISO: isoPath},
+		{name: "invalid live CD-ROM index", inactiveXML: inactive, liveXML: liveWithInvalidCDROMIndex, expectedISO: isoPath},
+		{name: "zero live CD-ROM index", inactiveXML: inactive, liveXML: liveWithZeroCDROMIndex, expectedISO: isoPath},
+		{name: "unknown live CD-ROM source attribute", inactiveXML: inactive, liveXML: liveWithUnknownCDROMSourceAttribute, expectedISO: isoPath},
 		{name: "attached file without --iso", inactiveXML: inactive, liveXML: live},
 	}
 

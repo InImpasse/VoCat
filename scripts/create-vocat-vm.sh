@@ -331,7 +331,15 @@ def validate(xml_path, scope):
                            "CD-ROM media must be ejected unless --iso is supplied")
             continue
         cdrom_file = cdrom_source.get("file", "") if cdrom_source is not None else ""
-        scoped_require(cdrom_source is not None and set(cdrom_source.attrib) == {"file"} and
+        cdrom_source_attributes = set(cdrom_source.attrib) if cdrom_source is not None else set()
+        allowed_cdrom_source_attributes = ({"file"}, {"file", "index"}) if scope == "live" else ({"file"},)
+        cdrom_index = cdrom_source.get("index") if cdrom_source is not None else None
+        index_valid = (cdrom_index is None or
+                       (scope == "live" and cdrom_index.isascii() and cdrom_index.isdigit() and
+                        str(int(cdrom_index)) == cdrom_index and int(cdrom_index) > 0))
+        scoped_require(cdrom_source is not None and
+                       cdrom_source_attributes in allowed_cdrom_source_attributes and
+                       index_valid and not list(cdrom_source) and
                        cdrom_file == expected_iso and os.path.realpath(cdrom_file) == expected_iso,
                        "CD-ROM source is not the expected ISO")
         try:

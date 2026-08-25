@@ -184,7 +184,7 @@ func (backend *nativeBackend) Readers(ctx context.Context) ([]Reader, error) {
 		}
 		readers = append(readers, reader)
 	}
-	return mergePCSCAndUSBReaders(readers, physical), nil
+	return filterVirtualPCDReaders(mergePCSCAndUSBReaders(readers, physical)), nil
 }
 
 func (backend *nativeBackend) readerUSBPath(ctx context.Context, client *pcscdClient, name string) (string, bool) {

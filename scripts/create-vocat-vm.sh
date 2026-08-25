@@ -527,8 +527,10 @@ virt_install_args=(
   --graphics "spice,listen=127.0.0.1"
   --video virtio
   --console "pty,target.type=serial"
+  --channel none
   --channel "unix,target.type=virtio,target.name=org.qemu.guest_agent.0"
   --rng /dev/urandom
+  --redirdev none
   --autostart
   --noautoconsole
 )

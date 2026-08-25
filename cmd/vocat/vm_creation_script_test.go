@@ -66,6 +66,22 @@ func TestVMCreationBindsConfiguredResourcesToCreationAndChecks(t *testing.T) {
 	}
 }
 
+func TestVMCreationDisablesImplicitSPICEDevices(t *testing.T) {
+	scriptBytes, err := os.ReadFile("../../scripts/create-vocat-vm.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptBytes)
+	disableChannels := strings.Index(script, `--channel none`)
+	guestAgent := strings.Index(script, `--channel "unix,target.type=virtio,target.name=org.qemu.guest_agent.0"`)
+	if disableChannels < 0 || guestAgent < 0 || disableChannels >= guestAgent {
+		t.Error("VM creation does not disable implicit SPICE channels before adding the guest agent")
+	}
+	if !strings.Contains(script, `--redirdev none`) {
+		t.Error("VM creation does not disable implicit SPICE USB redirection")
+	}
+}
+
 func TestVMCreationUsesVerifiedSSDISOSnapshot(t *testing.T) {
 	scriptBytes, err := os.ReadFile("../../scripts/create-vocat-vm.sh")
 	if err != nil {

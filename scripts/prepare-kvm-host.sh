@@ -4,6 +4,7 @@ export LC_ALL=C
 
 readonly REQUIRED_PACKAGES=(
   qemu-system-x86
+  qemu-system-modules-spice
   qemu-utils
   libvirt-daemon-system
   libvirt-clients
@@ -150,6 +151,9 @@ for command_name in python3 qemu-system-x86_64 qemu-img virsh virt-install swtpm
   fi
 done
 ((missing == 0)) || die 'required KVM tools are not installed'
+
+qemu-system-x86_64 -spice help >/dev/null 2>&1 ||
+  die 'QEMU SPICE backend is unavailable; install qemu-system-modules-spice'
 
 [[ -c /dev/kvm ]] || die '/dev/kvm is unavailable'
 [[ -r /dev/kvm && -w /dev/kvm ]] || die 'the current user cannot access /dev/kvm'

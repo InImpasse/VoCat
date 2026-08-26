@@ -41,6 +41,7 @@ type CarrierProfile struct {
 	IMSIdentityProfile                 string
 	IMSRegisterProfile                 string
 	IMSIPSecEncryption                 string
+	IMSDeviceInstance                  string
 	SMSCenter                          string
 	PANIEnabled                        *bool
 	PANICountry                        string
@@ -117,6 +118,7 @@ type carrierProfileIMS struct {
 	IdentityProfile                    string                        `json:"identity_profile,omitempty"`
 	RegisterProfile                    string                        `json:"register_profile,omitempty"`
 	IPSecEncryption                    string                        `json:"ipsec_encryption,omitempty"`
+	DeviceInstance                     string                        `json:"device_instance,omitempty"`
 	SMSCenter                          string                        `json:"sms_center,omitempty"`
 	PANIEnabled                        *bool                         `json:"pani_enabled,omitempty"`
 	PANICountry                        string                        `json:"pani_country,omitempty"`
@@ -146,6 +148,8 @@ type carrierProfileRegisterOptions struct {
 var carrierProfilesJSON []byte
 
 var builtinCarrierProfiles = mustLoadCarrierProfiles(carrierProfilesJSON)
+
+const IMSDeviceInstanceGSMAIMEI = "gsma_imei"
 
 var externalCarrierProfiles = struct {
 	sync.RWMutex
@@ -322,6 +326,9 @@ func validCarrierProfileRule(rule carrierProfileRule) bool {
 	}
 	if encryption := strings.ToLower(strings.TrimSpace(rule.IMS.IPSecEncryption)); encryption != "" &&
 		encryption != "aes-cbc" && encryption != "null" {
+		return false
+	}
+	if value := strings.ToLower(strings.TrimSpace(rule.IMS.DeviceInstance)); value != "" && value != IMSDeviceInstanceGSMAIMEI {
 		return false
 	}
 	if country := strings.ToUpper(strings.TrimSpace(rule.IMS.PANICountry)); country != "" &&
@@ -591,6 +598,7 @@ func applyCarrierProfileRule(base CarrierProfile, rule carrierProfileRule, sourc
 	if value := strings.ToLower(strings.TrimSpace(rule.IMS.IPSecEncryption)); value != "" {
 		base.IMSIPSecEncryption = value
 	}
+	base.IMSDeviceInstance = strings.ToLower(strings.TrimSpace(rule.IMS.DeviceInstance))
 	base.SMSCenter = strings.TrimSpace(rule.IMS.SMSCenter)
 	if rule.IMS.PANIEnabled != nil {
 		enabled := *rule.IMS.PANIEnabled

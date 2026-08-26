@@ -649,11 +649,8 @@ func newSession(
 	if err != nil {
 		return nil, err
 	}
-	instanceURI := "urn:uuid:" + instanceID
 	profile := vowifi.ResolveCarrierProfile(request.Identity)
-	if profile.IMSRegisterOptions.ContactFormat == vowifi.IMSContactFormatGSMA {
-		instanceURI = sipInstanceID(request.Identity, instanceID)
-	}
+	instanceURI := sessionInstanceID(profile, request.Identity, instanceID)
 	refreshContext, refreshCancel := context.WithCancel(context.Background())
 	session := &Session{
 		provider:           provider,
@@ -739,6 +736,14 @@ func newSession(
 		session.protectedUDP = protectedUDP
 	}
 	return session, nil
+}
+
+func sessionInstanceID(profile vowifi.CarrierProfile, identity vowifi.SIMIdentity, fallback string) string {
+	if profile.IMSDeviceInstance == vowifi.IMSDeviceInstanceGSMAIMEI ||
+		profile.IMSRegisterOptions.ContactFormat == vowifi.IMSContactFormatGSMA {
+		return sipInstanceID(identity, fallback)
+	}
+	return "urn:uuid:" + strings.TrimSpace(fallback)
 }
 
 func securityEncryptionForIdentity(identity vowifi.SIMIdentity) string {

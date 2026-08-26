@@ -8389,7 +8389,8 @@
         "proposal": "modern"
       },
       "ims": {
-        "ipsec_encryption": "aes-cbc"
+        "ipsec_encryption": "aes-cbc",
+        "device_instance": "gsma_imei"
       }
     },
     {

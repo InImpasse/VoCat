@@ -80,6 +80,29 @@ func TestResolveCarrierProfileATT(t *testing.T) {
 	}
 }
 
+func TestResolveCarrierProfileUsesStableTMobileDeviceInstance(t *testing.T) {
+	profile := ResolveCarrierProfile(SIMIdentity{
+		HomeMCC: "310", HomeMNC: "260", GID1: "54",
+	})
+	if profile.ID != "ipcc-t-mobile-310160" || profile.IMSDeviceInstance != IMSDeviceInstanceGSMAIMEI {
+		t.Fatalf("T-Mobile device instance profile = %#v", profile)
+	}
+	if profile.IMSRegisterOptions.ContactFormat != "" {
+		t.Fatalf("T-Mobile candidate changed Contact format to %q", profile.IMSRegisterOptions.ContactFormat)
+	}
+}
+
+func TestCarrierProfileRejectsUnknownDeviceInstance(t *testing.T) {
+	rule := carrierProfileRule{
+		ID:    "invalid-device-instance",
+		Match: carrierProfileMatch{HomePLMNs: []string{"00101"}},
+		IMS:   carrierProfileIMS{DeviceInstance: "unknown"},
+	}
+	if validCarrierProfileRule(rule) {
+		t.Fatal("carrier profile accepted an unknown device instance mode")
+	}
+}
+
 func TestResolveCarrierProfileRedPocketOutranksBroadATTICCID(t *testing.T) {
 	profile := ResolveCarrierProfile(SIMIdentity{
 		ICCID: "8901410000000000001", IMSI: "310170000000001",

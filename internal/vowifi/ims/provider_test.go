@@ -609,6 +609,20 @@ func TestSipInstanceIDUsesGSMAFormWhenIMEIIsAvailable(t *testing.T) {
 	}
 }
 
+func TestSessionInstanceIDUsesStableTMobileIdentityOnly(t *testing.T) {
+	fallback := "00000000-0000-4000-8000-000000000001"
+	identity := vowifi.SIMIdentity{
+		IMEI: "353024112557010", HomeMCC: "310", HomeMNC: "260", GID1: "54",
+	}
+	tmobile := vowifi.ResolveCarrierProfile(identity)
+	if got := sessionInstanceID(tmobile, identity, fallback); got != "urn:gsma:imei:353024112557010-0" {
+		t.Fatalf("T-Mobile session instance = %q", got)
+	}
+	if got := sessionInstanceID(vowifi.CarrierProfile{}, identity, fallback); got != "urn:uuid:"+fallback {
+		t.Fatalf("standard session instance = %q", got)
+	}
+}
+
 func TestGSMAContactFormatUsesAddressAndDeviceInstance(t *testing.T) {
 	session := &Session{
 		identity:   identitySet{user: "234105776448519"},

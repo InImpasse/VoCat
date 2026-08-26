@@ -83,6 +83,28 @@ func TestSessionReceivesAndAcknowledgesSMSOverIMS(t *testing.T) {
 	}
 }
 
+func TestProtectedUDPReceiverPublishesUnexpectedExit(t *testing.T) {
+	listener, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &Session{protectedUDP: listener, failures: make(chan error, 1)}
+	session.receiveDone.Add(1)
+	go session.readProtectedUDP()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-session.failures:
+		if err == nil || !strings.Contains(err.Error(), "protected UDP receive loop") {
+			t.Fatalf("runtime failure = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("protected UDP receiver exited without publishing a runtime failure")
+	}
+	session.receiveDone.Wait()
+}
+
 func TestRuntimeSecurityHeaders(t *testing.T) {
 	verify := "ipsec-3gpp;alg=hmac-sha-1-96;prot=esp;mod=trans"
 	headers := runtimeSecurityHeaders(true, verify)

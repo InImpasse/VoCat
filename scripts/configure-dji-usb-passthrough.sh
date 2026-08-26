@@ -68,7 +68,7 @@ preserve_installed_slots() {
      $(installed_value VENDOR_ID) == "$EXPECTED_VENDOR" &&
      $(installed_value PRODUCT_ID) == "$EXPECTED_PRODUCT" ]] || die 'installed USB allowlist uses an incompatible profile'
   installed_count=$(installed_value DEVICE_COUNT)
-  [[ $installed_count =~ ^[1-9][0-9]{0,2}$ ]] && ((installed_count <= 255)) || die 'installed USB allowlist has an invalid device count'
+  [[ $installed_count =~ ^[1-9][0-9]?$ ]] && ((installed_count <= 14)) || die 'installed USB allowlist has an invalid device count'
   [[ $(wc -l <"$CONFIG_TARGET") == $((5 + installed_count * 2)) ]] || die 'installed USB allowlist contains unexpected entries'
 
   declare -A selected_by_path=() used=()
@@ -114,7 +114,7 @@ if ((${#sysnames[@]} == 0)); then
   done
 fi
 device_count=${#sysnames[@]}
-((device_count >= 1 && device_count <= 255)) || die 'expected between 1 and 255 connected or selected DJI USB devices'
+((device_count >= 1 && device_count <= 14)) || die 'expected between 1 and 14 connected or selected DJI USB devices'
 declare -A seen_sysnames=()
 for sysname in "${sysnames[@]}"; do
   [[ $sysname =~ ^[0-9]+-[0-9]+([.][0-9]+)*$ ]] || die '--sysname must identify a USB device such as 1-2'
@@ -284,7 +284,17 @@ systemctl daemon-reload
 udevadm control --reload-rules
 
 attached=()
-for sysname in "${sysnames[@]}"; do
+retained_existing=false
+for index in "${!sysnames[@]}"; do
+  sysname=${sysnames[$index]}
+  slot=$((index + 1))
+  current_state=$STATE_DIR/slot-$slot/current
+  if [[ -e $current_state || -L $current_state ]]; then
+    "$HOTPLUG_TARGET" check "$sysname" >/dev/null ||
+      die 'existing USB attachment failed validation after the hotplug update'
+    retained_existing=true
+    continue
+  fi
   if "$HOTPLUG_TARGET" attach "$sysname"; then
     attached+=("$sysname")
   else
@@ -297,4 +307,7 @@ for sysname in "${sysnames[@]}"; do
     die 'multi-device attachment failed and completed attachments were rolled back'
   fi
 done
+if [[ $retained_existing == true ]]; then
+  log 'Existing attachments were retained. Unplug all enrolled modules before reconnecting them in any order to activate stable guest USB slots.'
+fi
 log "$device_count path-bound DJI USB device(s) are enrolled with optional hotplug passthrough."

@@ -51,7 +51,7 @@ func TestDJIPassthroughSupportsAllDiscoveredPathBoundSlots(t *testing.T) {
 		`printf 'DEVICE_%s_SERIAL=%s\nDEVICE_%s_ID_PATH=%s\n'`,
 		`config_value "DEVICE_${slot}_SERIAL"`,
 		`config_value "DEVICE_${slot}_ID_PATH"`,
-		`((device_count >= 1 && device_count <= 255))`,
+		`((device_count >= 1 && device_count <= 14))`,
 		`if ((${#sysnames[@]} == 0)); then`,
 		`sysnames+=("$candidate")`,
 		`HOSTDEV_ALIAS=ua-vocat-dji-usb-$selected`,
@@ -62,6 +62,18 @@ func TestDJIPassthroughSupportsAllDiscoveredPathBoundSlots(t *testing.T) {
 	}
 	if strings.Contains(configure, "a stable USB serial is required") {
 		t.Fatal("configuration still requires a USB serial for path-bound devices")
+	}
+}
+
+func TestDJIHotplugPinsGuestUSBPortToEnrolledSlot(t *testing.T) {
+	script := readUSBPassthroughAsset(t, "../../scripts/vocat-usb-hotplug.sh")
+	for _, required := range []string{
+		`GUEST_USB_PORT=$((selected + 1))`,
+		`<address type='usb' bus='0' port='$GUEST_USB_PORT'/>`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("hotplug script does not pin the guest USB port with %q", required)
+		}
 	}
 }
 
@@ -128,6 +140,19 @@ func TestDJIMultiDeviceApplyReportsIncompleteRollback(t *testing.T) {
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("multi-device rollback is missing %q", required)
+		}
+	}
+}
+
+func TestDJIApplyRetainsExistingAttachmentsForOrderSafeMigration(t *testing.T) {
+	script := readUSBPassthroughAsset(t, "../../scripts/configure-dji-usb-passthrough.sh")
+	for _, required := range []string{
+		`current_state=$STATE_DIR/slot-$slot/current`,
+		`"$HOTPLUG_TARGET" check "$sysname"`,
+		`Unplug all enrolled modules before reconnecting them in any order`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("existing attachment migration is missing %q", required)
 		}
 	}
 }

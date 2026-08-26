@@ -161,6 +161,9 @@ func (session *Session) acceptProtectedTCP() {
 	for {
 		connection, err := session.protectedTCP.AcceptTCP()
 		if err != nil {
+			if !session.isClosed() {
+				session.publishFailure(fmt.Errorf("ims: protected TCP receive loop: %w", err))
+			}
 			return
 		}
 		if !session.validProtectedTCPSource(connection.RemoteAddr()) {
@@ -209,6 +212,9 @@ func (session *Session) readProtectedUDP() {
 	for {
 		count, remote, err := session.protectedUDP.ReadFromUDP(buffer)
 		if err != nil {
+			if !session.isClosed() {
+				session.publishFailure(fmt.Errorf("ims: protected UDP receive loop: %w", err))
+			}
 			return
 		}
 		if !session.validProtectedUDPSource(remote) {

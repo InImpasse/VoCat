@@ -293,7 +293,11 @@ unique, stable udev `ID_PATH`. A USB serial is optional because some reviewed
 devices do not expose one; when present, it is an additional required match.
 Serial-less devices are therefore bound to their enrolled physical USB ports.
 Moving one to another port is rejected. Never weaken the allowlist to
-VID/PID-only matching.
+VID/PID-only matching. Each enrolled host slot is also pinned to a matching
+guest USB port, so reconnect order cannot swap the guest device IDs. The
+reviewed qemu-xhci profile supports up to 14 enrolled modules. Without a USB
+serial this identifies the physical port, not a module moved between ports;
+use the existing user-defined device name for a human-readable label.
 
 List matching sysfs names without printing identifiers:
 
@@ -318,6 +322,9 @@ real identities only in a root-only host file, assigns independent aliases and
 recoverable state to every enrolled managed USB hostdev, and rejects duplicate
 paths, unexpected aliases, and PCI/xHCI passthrough. Run `--apply` again after
 adding a new physical device; already enrolled devices hotplug automatically.
+After upgrading an existing installation to stable guest USB slots, `--apply`
+retains current attachments. Unplug all enrolled modules, then reconnect them
+in any order once so every old automatic guest address is released first.
 Validate each device independently after cold boot, hotplug, unplug/replug, and
 VM restart before modem testing.
 

@@ -56,8 +56,8 @@ load_allowlist() {
   [[ $schema == 2 ]] || die 'allowlist schema is unsupported'
   [[ $domain =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$ ]] || die 'invalid domain in allowlist'
   [[ $vendor_id == 2ca3 && $product_id == 4006 ]] || die 'allowlist is not the reviewed DJI 2ca3:4006 device composition'
-  [[ $device_count =~ ^[1-9][0-9]{0,2}$ ]] && ((device_count <= 255)) ||
-    die 'allowlist must contain between 1 and 255 devices'
+  [[ $device_count =~ ^[1-9][0-9]?$ ]] && ((device_count <= 14)) ||
+    die 'allowlist must contain between 1 and 14 devices'
 
   serials=()
   id_paths=()
@@ -86,6 +86,7 @@ select_slot() {
   serial=${serials[selected - 1]}
   id_path=${id_paths[selected - 1]}
   HOSTDEV_ALIAS=ua-vocat-dji-usb-$selected
+  GUEST_USB_PORT=$((selected + 1))
   SLOT_STATE=$STATE_DIR/slot-$selected
   CURRENT_STATE=$SLOT_STATE/current
   PENDING_STATE=$SLOT_STATE/pending
@@ -553,6 +554,7 @@ printf '%s\n' \
   "    <address bus='$bus_number' device='$device_number'/>" \
   '  </source>' \
   "  <alias name='$HOSTDEV_ALIAS'/>" \
+  "  <address type='usb' bus='0' port='$GUEST_USB_PORT'/>" \
   '</hostdev>' >"$new_xml"
 printf '%s\n' "$sysname" >"$new_sysname"
 assert_managed_passthrough "$new_xml" state yes || die 'generated USB hostdev XML failed validation'

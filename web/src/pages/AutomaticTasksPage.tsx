@@ -28,31 +28,13 @@ import {
   createAutomaticTaskProfileRequestGuard,
   selectAutomaticTaskProfileOption,
 } from "../lib/automaticTaskProfiles";
+import { automaticTaskUpdate, type AutomaticTaskWrite } from "../lib/automaticTaskRequest";
 
 type TaskType = "sms" | "call" | "public_ip";
 type TaskEnvironment = "vowifi" | "cellular";
 
-interface AutomaticTaskPayload {
-  phone?: string;
-  message?: string;
-  durationSeconds?: number;
-}
-
-interface AutomaticTask {
+interface AutomaticTask extends AutomaticTaskWrite {
   id: number;
-  name: string;
-  enabled: boolean;
-  deviceId: string;
-  profileIccid: string;
-  profileAid: string;
-  taskType: TaskType;
-  environment: TaskEnvironment;
-  intervalDays: number;
-  startDate: string;
-  runTime: string;
-  payload: AutomaticTaskPayload;
-  retryCount: number;
-  notify: boolean;
   nextRunAt: string;
   lastRunAt?: string;
   lastStatus: string;
@@ -385,7 +367,7 @@ export default function AutomaticTasksPage() {
   async function toggle(task: AutomaticTask) {
     setBusy(task.id);
     try {
-      await api(`/automatic-tasks/${task.id}`, { method: "PUT", body: { ...task, enabled: !task.enabled } });
+      await api(`/automatic-tasks/${task.id}`, { method: "PUT", body: automaticTaskUpdate(task, !task.enabled) });
       await load();
     } catch (error) {
       message.error(apiMessage(error));

@@ -13,9 +13,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"vocat/internal/vowifi"
 )
 
 const userspaceTunnelMTU = 1380
@@ -45,6 +48,16 @@ type linuxUserspaceHandle struct {
 	terminalErr error
 	failures    chan error
 	cleanup     []ipCleanupCommand
+	diagnostics userspaceDataplaneCounters
+}
+
+type userspaceDataplaneCounters struct {
+	receivedESP         atomic.Uint64
+	acceptedESP         atomic.Uint64
+	authenticationDrops atomic.Uint64
+	replayDrops         atomic.Uint64
+	policyDrops         atomic.Uint64
+	malformedDrops      atomic.Uint64
 }
 
 type ipCleanupCommand struct {
@@ -53,6 +66,48 @@ type ipCleanupCommand struct {
 }
 
 func (*linuxUserspaceHandle) DataplaneMode() string { return "userspace" }
+
+func (handle *linuxUserspaceHandle) DataplaneDiagnostics() vowifi.DataplaneDiagnostics {
+	return handle.diagnostics.snapshot()
+}
+
+func incrementSaturating(counter *atomic.Uint64) {
+	for {
+		current := counter.Load()
+		if current == ^uint64(0) || counter.CompareAndSwap(current, current+1) {
+			return
+		}
+	}
+}
+
+func (counters *userspaceDataplaneCounters) recordReceived() {
+	incrementSaturating(&counters.receivedESP)
+}
+
+func (counters *userspaceDataplaneCounters) recordAccepted() {
+	incrementSaturating(&counters.acceptedESP)
+}
+
+func (counters *userspaceDataplaneCounters) recordDrop(err error) {
+	switch {
+	case errors.Is(err, errESPAuthentication):
+		incrementSaturating(&counters.authenticationDrops)
+	case errors.Is(err, errESPReplay):
+		incrementSaturating(&counters.replayDrops)
+	case errors.Is(err, errESPPolicyDrop):
+		incrementSaturating(&counters.policyDrops)
+	default:
+		incrementSaturating(&counters.malformedDrops)
+	}
+}
+
+func (counters *userspaceDataplaneCounters) snapshot() vowifi.DataplaneDiagnostics {
+	return vowifi.DataplaneDiagnostics{
+		ReceivedESP: counters.receivedESP.Load(), AcceptedESP: counters.acceptedESP.Load(),
+		AuthenticationDrops: counters.authenticationDrops.Load(), ReplayDrops: counters.replayDrops.Load(),
+		PolicyDrops: counters.policyDrops.Load(), MalformedDrops: counters.malformedDrops.Load(),
+	}
+}
 
 func (installer linuxUserspaceInstaller) Install(
 	ctx context.Context,
@@ -525,11 +580,13 @@ func (handle *linuxUserspaceHandle) copyRelayToTUN() {
 			}
 			return
 		}
+		handle.diagnostics.recordReceived()
 		cleartext, err := handle.tunnel.open(buffer[:count])
 		if err != nil {
 			// Invalid ICVs, replays, malformed padding, and packets outside the
 			// negotiated selectors are untrusted network input. Drop them
 			// without allowing a forged datagram to tear down the CHILD_SA.
+			handle.diagnostics.recordDrop(err)
 			continue
 		}
 		if err := writeTUNPacket(handle.runContext, handle.tunFD, cleartext); err != nil {
@@ -538,6 +595,7 @@ func (handle *linuxUserspaceHandle) copyRelayToTUN() {
 			}
 			return
 		}
+		handle.diagnostics.recordAccepted()
 	}
 }
 

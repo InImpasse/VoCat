@@ -71,8 +71,17 @@ func New(deps Dependencies, options Options) (*Orchestrator, error) {
 // State returns a detached snapshot safe for mutation by the caller.
 func (orchestrator *Orchestrator) State() State {
 	orchestrator.mu.Lock()
-	defer orchestrator.mu.Unlock()
-	return orchestrator.state.clone()
+	snapshot := orchestrator.state.clone()
+	resources := orchestrator.resources
+	var tunnel TunnelSession
+	if resources != nil {
+		tunnel = resources.tunnel
+	}
+	orchestrator.mu.Unlock()
+	if tunnel != nil {
+		snapshot.DataplaneDiagnostics = tunnel.Evidence().DataplaneDiagnostics
+	}
+	return snapshot
 }
 
 // Subscribe returns the current state immediately and then the newest state on
@@ -297,7 +306,9 @@ func (orchestrator *Orchestrator) Enable(ctx context.Context) (State, error) {
 	if tunnel == nil {
 		return fail(PhaseTunnelReady, errors.New("tunnel provider returned a nil session"))
 	}
+	orchestrator.mu.Lock()
 	resources.tunnel = tunnel
+	orchestrator.mu.Unlock()
 	tunnelEvidence := tunnel.Evidence()
 	if !tunnelEvidence.Established {
 		orchestrator.mutate(func(state *State) {
@@ -333,7 +344,9 @@ func (orchestrator *Orchestrator) Enable(ctx context.Context) (State, error) {
 	if ims == nil {
 		return fail(PhaseIMSReady, errors.New("IMS provider returned a nil session"))
 	}
+	orchestrator.mu.Lock()
 	resources.ims = ims
+	orchestrator.mu.Unlock()
 	orchestrator.watchRuntimeIMS(runtimeContext, resources, ims)
 	imsEvidence := ims.Evidence()
 	if !imsEvidence.Registered {
@@ -767,18 +780,22 @@ func (orchestrator *Orchestrator) cleanupSessions(resources *runtimeResources) [
 	if resources == nil {
 		return nil
 	}
+	orchestrator.mu.Lock()
+	ims := resources.ims
+	tunnel := resources.tunnel
+	resources.ims = nil
+	resources.tunnel = nil
+	orchestrator.mu.Unlock()
 	var cleanupErrors []string
-	if resources.ims != nil {
-		if err := orchestrator.cleanupCall(resources.ims.Close); err != nil {
+	if ims != nil {
+		if err := orchestrator.cleanupCall(ims.Close); err != nil {
 			cleanupErrors = append(cleanupErrors, "close IMS: "+err.Error())
 		}
-		resources.ims = nil
 	}
-	if resources.tunnel != nil {
-		if err := orchestrator.cleanupCall(resources.tunnel.Close); err != nil {
+	if tunnel != nil {
+		if err := orchestrator.cleanupCall(tunnel.Close); err != nil {
 			cleanupErrors = append(cleanupErrors, "close tunnel: "+err.Error())
 		}
-		resources.tunnel = nil
 	}
 	return cleanupErrors
 }

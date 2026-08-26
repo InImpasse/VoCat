@@ -5,14 +5,56 @@ package ike
 import (
 	"context"
 	"errors"
+	"math"
 	"net"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestUserspaceDataplaneDiagnosticsClassifyDrops(t *testing.T) {
+	var counters userspaceDataplaneCounters
+	counters.recordReceived()
+	counters.recordAccepted()
+	counters.recordDrop(errESPAuthentication)
+	counters.recordDrop(errESPReplay)
+	counters.recordDrop(errESPPolicyDrop)
+	counters.recordDrop(errors.New("malformed"))
+
+	got := counters.snapshot()
+	if got.ReceivedESP != 1 || got.AcceptedESP != 1 ||
+		got.AuthenticationDrops != 1 || got.ReplayDrops != 1 ||
+		got.PolicyDrops != 1 || got.MalformedDrops != 1 {
+		t.Fatalf("diagnostics = %#v", got)
+	}
+}
+
+func TestUserspaceDataplaneDiagnosticsAreConcurrentAndSaturating(t *testing.T) {
+	var counters userspaceDataplaneCounters
+	var workers sync.WaitGroup
+	for range 8 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for range 1000 {
+				counters.recordReceived()
+			}
+		}()
+	}
+	workers.Wait()
+	if got := counters.snapshot().ReceivedESP; got != 8000 {
+		t.Fatalf("concurrent received ESP = %d", got)
+	}
+	counters.receivedESP.Store(math.MaxUint64)
+	counters.recordReceived()
+	if got := counters.snapshot().ReceivedESP; got != math.MaxUint64 {
+		t.Fatalf("saturated received ESP = %d", got)
+	}
+}
 
 func TestValidateUserspaceRoutesAllowsOnlyNegotiatedEndpoints(t *testing.T) {
 	t.Parallel()

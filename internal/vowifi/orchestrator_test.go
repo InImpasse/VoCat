@@ -233,6 +233,19 @@ func (fake *fakeTunnelSession) Failures() <-chan error {
 	return fake.environment.tunnelFailures
 }
 
+func TestStateIncludesLiveTunnelDataplaneDiagnostics(t *testing.T) {
+	environment := newFakeEnvironment()
+	want := DataplaneDiagnostics{ReceivedESP: 8, AcceptedESP: 6, AuthenticationDrops: 2}
+	environment.tunnelEvidence.DataplaneDiagnostics = want
+	orchestrator := &Orchestrator{
+		state:     State{Phase: PhaseSMSReady},
+		resources: &runtimeResources{tunnel: &fakeTunnelSession{environment: environment}},
+	}
+	if got := orchestrator.State().DataplaneDiagnostics; got != want {
+		t.Fatalf("dataplane diagnostics = %#v, want %#v", got, want)
+	}
+}
+
 type fakeIMSProvider struct{ environment *fakeEnvironment }
 
 func (fake fakeIMSProvider) Start(ctx context.Context, _ IMSRequest) (IMSSession, error) {
@@ -378,6 +391,7 @@ func TestEnableUsesEvidenceBackedOrderAndDisableRollsBackInReverse(t *testing.T)
 		"ims.evidence",
 		"phone.save",
 		"ims.sms",
+		"tunnel.evidence",
 	}
 	if calls := environment.callsSnapshot(); !reflect.DeepEqual(calls, wantEnableCalls) {
 		t.Fatalf("enable calls = %#v, want %#v", calls, wantEnableCalls)

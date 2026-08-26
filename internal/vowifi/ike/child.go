@@ -292,6 +292,10 @@ type DataplaneEvidence interface {
 	DataplaneMode() string
 }
 
+type DataplaneDiagnosticsEvidence interface {
+	DataplaneDiagnostics() vowifi.DataplaneDiagnostics
+}
+
 type DataplaneFailureNotifier interface {
 	Failures() <-chan error
 }

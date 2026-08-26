@@ -317,6 +317,11 @@ sudo udevadm trigger --action=add --subsystem-match=usb \
 --timeout 60s`。自动实例不会把详细拓扑写入 journald；手工命令只能在私有控制台
 使用。
 
+已认证的设备状态响应会返回当前用户态 ESP 会话的 `dataplane_diagnostics`。
+其中只有收到、接受、认证丢弃、重放丢弃、策略丢弃和格式错误丢弃的累计计数；
+会话重建后归零且不会持久化，不包含数据包、端点、SPI、密钥、模块、SIM、号码或
+短信信息。
+
 固件只在维护窗读取。先停止 VoCat，再使用 `scripts/read-dji-firmware.sh`；它只
 发送 `ATI`、`AT+CGMM` 和 `AT+CGMR`。首轮部署不升级固件。
 

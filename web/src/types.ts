@@ -28,6 +28,15 @@ export interface ApiErrorBody {
   busy?: boolean;
 }
 
+export interface DataplaneDiagnostics {
+  receivedEsp: number;
+  acceptedEsp: number;
+  authenticationDrops: number;
+  replayDrops: number;
+  policyDrops: number;
+  malformedDrops: number;
+}
+
 export interface VoWiFiRuntime {
   deviceId: string;
   phase: string;
@@ -36,6 +45,7 @@ export interface VoWiFiRuntime {
   carrierProfile?: string;
   carrierProfileFrom?: string;
   dataplaneMode: string;
+  dataplaneDiagnostics: DataplaneDiagnostics;
   iccid: string;
   imsi: string;
   simReady: boolean;

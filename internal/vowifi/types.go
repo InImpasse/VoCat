@@ -79,44 +79,56 @@ type SecurityAudit struct {
 	ESPIntegrity          string              `json:"esp_integrity,omitempty"`
 }
 
+// DataplaneDiagnostics contains aggregate counters only. It deliberately
+// excludes packet contents, endpoints, SPIs, keying material, and identities.
+type DataplaneDiagnostics struct {
+	ReceivedESP         uint64 `json:"received_esp"`
+	AcceptedESP         uint64 `json:"accepted_esp"`
+	AuthenticationDrops uint64 `json:"authentication_drops"`
+	ReplayDrops         uint64 `json:"replay_drops"`
+	PolicyDrops         uint64 `json:"policy_drops"`
+	MalformedDrops      uint64 `json:"malformed_drops"`
+}
+
 // State is an immutable snapshot when returned by Orchestrator.State or a
 // subscription. Enabled means desired policy; Active means a tunnel session
 // exists. Neither is proof of IMS registration.
 type State struct {
-	DeviceID           string        `json:"device_id"`
-	ICCID              string        `json:"iccid,omitempty"`
-	IMSI               string        `json:"imsi,omitempty"`
-	Phase              Phase         `json:"phase"`
-	Enabled            bool          `json:"enabled"`
-	Active             bool          `json:"active"`
-	SIMReady           bool          `json:"sim_ready"`
-	AccessReady        bool          `json:"access_ready"`
-	TunnelReady        bool          `json:"tunnel_ready"`
-	IMSReady           bool          `json:"ims_ready"`
-	SMSReady           bool          `json:"sms_ready"`
-	PureAirplanePolicy bool          `json:"pure_airplane_policy"`
-	HomeMCC            string        `json:"home_mcc,omitempty"`
-	HomeMNC            string        `json:"home_mnc,omitempty"`
-	CarrierProfile     string        `json:"carrier_profile,omitempty"`
-	CarrierProfileFrom string        `json:"carrier_profile_from,omitempty"`
-	EPDG               string        `json:"epdg,omitempty"`
-	ProxyMode          ProxyMode     `json:"proxy_mode,omitempty"`
-	ProxyID            string        `json:"proxy_id,omitempty"`
-	TunnelName         string        `json:"tunnel_name,omitempty"`
-	DataplaneMode      string        `json:"dataplane_mode,omitempty"`
-	IMSRegistration    string        `json:"ims_registration,omitempty"`
-	PhoneNumber        string        `json:"phone_number,omitempty"`
-	PhoneNumberSource  string        `json:"phone_number_source,omitempty"`
-	LastErrorClass     string        `json:"last_error_class,omitempty"`
-	LastError          string        `json:"last_error,omitempty"`
-	LastReason         string        `json:"last_reason,omitempty"`
-	Warnings           []string      `json:"warnings,omitempty"`
-	CleanupErrors      []string      `json:"cleanup_errors,omitempty"`
-	Security           SecurityAudit `json:"security"`
-	Attempt            uint64        `json:"attempt"`
-	Sequence           uint64        `json:"sequence"`
-	StartedAt          *time.Time    `json:"started_at,omitempty"`
-	UpdatedAt          time.Time     `json:"updated_at"`
+	DeviceID             string               `json:"device_id"`
+	ICCID                string               `json:"iccid,omitempty"`
+	IMSI                 string               `json:"imsi,omitempty"`
+	Phase                Phase                `json:"phase"`
+	Enabled              bool                 `json:"enabled"`
+	Active               bool                 `json:"active"`
+	SIMReady             bool                 `json:"sim_ready"`
+	AccessReady          bool                 `json:"access_ready"`
+	TunnelReady          bool                 `json:"tunnel_ready"`
+	IMSReady             bool                 `json:"ims_ready"`
+	SMSReady             bool                 `json:"sms_ready"`
+	PureAirplanePolicy   bool                 `json:"pure_airplane_policy"`
+	HomeMCC              string               `json:"home_mcc,omitempty"`
+	HomeMNC              string               `json:"home_mnc,omitempty"`
+	CarrierProfile       string               `json:"carrier_profile,omitempty"`
+	CarrierProfileFrom   string               `json:"carrier_profile_from,omitempty"`
+	EPDG                 string               `json:"epdg,omitempty"`
+	ProxyMode            ProxyMode            `json:"proxy_mode,omitempty"`
+	ProxyID              string               `json:"proxy_id,omitempty"`
+	TunnelName           string               `json:"tunnel_name,omitempty"`
+	DataplaneMode        string               `json:"dataplane_mode,omitempty"`
+	DataplaneDiagnostics DataplaneDiagnostics `json:"dataplane_diagnostics"`
+	IMSRegistration      string               `json:"ims_registration,omitempty"`
+	PhoneNumber          string               `json:"phone_number,omitempty"`
+	PhoneNumberSource    string               `json:"phone_number_source,omitempty"`
+	LastErrorClass       string               `json:"last_error_class,omitempty"`
+	LastError            string               `json:"last_error,omitempty"`
+	LastReason           string               `json:"last_reason,omitempty"`
+	Warnings             []string             `json:"warnings,omitempty"`
+	CleanupErrors        []string             `json:"cleanup_errors,omitempty"`
+	Security             SecurityAudit        `json:"security"`
+	Attempt              uint64               `json:"attempt"`
+	Sequence             uint64               `json:"sequence"`
+	StartedAt            *time.Time           `json:"started_at,omitempty"`
+	UpdatedAt            time.Time            `json:"updated_at"`
 }
 
 func (state State) clone() State {
@@ -229,18 +241,19 @@ type TunnelRequest struct {
 }
 
 type TunnelEvidence struct {
-	Established   bool
-	Name          string
-	DataplaneMode string
-	LocalIPv4     string
-	LocalIPv6     string
-	PCSCF         []string
-	ResponderAUTH ResponderAUTHStatus
-	IKEEncryption string
-	IKEIntegrity  string
-	IKEDHGroup    string
-	ESPEncryption string
-	ESPIntegrity  string
+	Established          bool
+	Name                 string
+	DataplaneMode        string
+	LocalIPv4            string
+	LocalIPv6            string
+	PCSCF                []string
+	ResponderAUTH        ResponderAUTHStatus
+	IKEEncryption        string
+	IKEIntegrity         string
+	IKEDHGroup           string
+	ESPEncryption        string
+	ESPIntegrity         string
+	DataplaneDiagnostics DataplaneDiagnostics
 }
 
 type IMSRequest struct {

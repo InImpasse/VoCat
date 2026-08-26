@@ -1053,9 +1053,13 @@ type Session struct {
 
 func (session *Session) Evidence() vowifi.TunnelEvidence {
 	session.mu.Lock()
-	defer session.mu.Unlock()
 	evidence := session.evidence
+	child := session.child
 	evidence.PCSCF = append([]string(nil), session.evidence.PCSCF...)
+	session.mu.Unlock()
+	if diagnostics, ok := child.(DataplaneDiagnosticsEvidence); ok {
+		evidence.DataplaneDiagnostics = diagnostics.DataplaneDiagnostics()
+	}
 	return evidence
 }
 

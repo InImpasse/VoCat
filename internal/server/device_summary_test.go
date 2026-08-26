@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +12,26 @@ import (
 	"vocat/internal/store"
 	"vocat/internal/vowifi"
 )
+
+func TestLiveVoWiFiRuntimeExposesOnlySafeDataplaneDiagnostics(t *testing.T) {
+	runtime := liveVoWiFiRuntime(vowifi.State{DataplaneDiagnostics: vowifi.DataplaneDiagnostics{
+		ReceivedESP: 7, AcceptedESP: 5, AuthenticationDrops: 1,
+		ReplayDrops: 2, PolicyDrops: 3, MalformedDrops: 4,
+	}})
+	diagnostics, ok := runtime["dataplane_diagnostics"].(vowifi.DataplaneDiagnostics)
+	if !ok || diagnostics.ReceivedESP != 7 || diagnostics.AcceptedESP != 5 {
+		t.Fatalf("dataplane diagnostics = %#v", runtime["dataplane_diagnostics"])
+	}
+	encoded, err := json.Marshal(diagnostics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"address", "device", "iccid", "imei", "imsi", "key", "message", "packet", "phone", "spi"} {
+		if strings.Contains(strings.ToLower(string(encoded)), forbidden) {
+			t.Fatalf("diagnostics exposed forbidden field %q: %s", forbidden, encoded)
+		}
+	}
+}
 
 func TestFillConfigFromPhysicalClassifiesDJI4G(t *testing.T) {
 	config := store.Device{DeviceType: store.DeviceTypePCIeEC20EC25}

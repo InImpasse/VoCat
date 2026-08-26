@@ -16,6 +16,21 @@ import (
 
 var errFirstAuthObserved = errors.New("test: first IKE_AUTH observed")
 
+type diagnosticChild struct{ diagnostics vowifi.DataplaneDiagnostics }
+
+func (child diagnosticChild) Close(context.Context) error { return nil }
+func (child diagnosticChild) DataplaneDiagnostics() vowifi.DataplaneDiagnostics {
+	return child.diagnostics
+}
+
+func TestSessionEvidenceIncludesLiveDataplaneDiagnostics(t *testing.T) {
+	want := vowifi.DataplaneDiagnostics{ReceivedESP: 4, AcceptedESP: 3, PolicyDrops: 1}
+	session := &Session{child: diagnosticChild{diagnostics: want}}
+	if got := session.Evidence().DataplaneDiagnostics; got != want {
+		t.Fatalf("dataplane diagnostics = %#v, want %#v", got, want)
+	}
+}
+
 type constantReader struct{ value byte }
 
 func TestLegacyProposalFallbackIsLimitedToNegotiationFailures(t *testing.T) {

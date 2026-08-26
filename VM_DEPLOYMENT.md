@@ -344,6 +344,12 @@ For private diagnostics, run `sudo /opt/vocat/current/vocat doctor
 --repair-dji-qmi --timeout 60s`. Automatic instances suppress detailed topology
 from journald; the manual command is intended only for a private console.
 
+The authenticated device status response includes `dataplane_diagnostics` for
+the current user-space ESP session. It contains only aggregate received,
+accepted, authentication-drop, replay-drop, policy-drop, and malformed-drop
+counters. The counters reset with the session and are never persisted; no
+packet, endpoint, SPI, key, modem, SIM, phone, or message data is included.
+
 Read firmware only during a maintenance window. Stop VoCat first and use
 `scripts/read-dji-firmware.sh`; it sends only `ATI`, `AT+CGMM`, and `AT+CGMR`.
 Do not upgrade firmware during the initial deployment.

@@ -109,6 +109,31 @@ func TestManagerPublishesDeviceLifecycleEvents(t *testing.T) {
 	}
 }
 
+func TestManagerExecuteATCancelsWhileWaitingForDeviceLock(t *testing.T) {
+	manager, id := newStartedTestManager(t, &transcriptClient{})
+	manager.mu.RLock()
+	state := manager.devices[id]
+	manager.mu.RUnlock()
+	state.opMu.Lock()
+	defer state.opMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := manager.ExecuteAT(ctx, id, "AT")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("ExecuteAT() error = %v, want context deadline", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("ExecuteAT() ignored context while waiting for the device lock")
+	}
+}
+
 func TestManagerRefreshBuildsEC20Snapshot(t *testing.T) {
 	client := &transcriptClient{steps: []clientStep{
 		{

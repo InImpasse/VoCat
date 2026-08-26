@@ -520,3 +520,25 @@ func newTestSession(t *testing.T, transport Transport) *Session {
 	}
 	return session
 }
+
+func TestSessionExecuteCancelsWhileWaitingForCommandLock(t *testing.T) {
+	session := newTestSession(t, &transcriptTransport{})
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := session.Execute(ctx, "AT")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Execute() error = %v, want context deadline", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Execute() ignored context while waiting for the command lock")
+	}
+}

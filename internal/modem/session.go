@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
+
+	"vocat/internal/ctxlock"
 )
 
 type Transport interface {
@@ -43,7 +44,7 @@ func (options SessionOptions) withDefaults() SessionOptions {
 // consuming each other's responses while still allowing interleaved URCs to be
 // separated and queued.
 type Session struct {
-	mu        sync.Mutex
+	mu        ctxlock.Mutex
 	transport Transport
 	options   SessionOptions
 	readBuf   []byte
@@ -92,7 +93,9 @@ func (session *Session) Execute(ctx context.Context, command string) (Response, 
 	ctx, cancel := session.commandContext(ctx)
 	defer cancel()
 
-	session.mu.Lock()
+	if err := session.mu.LockContext(ctx); err != nil {
+		return Response{}, err
+	}
 	defer session.mu.Unlock()
 	if session.closed {
 		return Response{}, ErrSessionClosed
@@ -124,7 +127,9 @@ func (session *Session) ExecutePrompt(
 	ctx, cancel := session.commandContext(ctx)
 	defer cancel()
 
-	session.mu.Lock()
+	if err := session.mu.LockContext(ctx); err != nil {
+		return Response{}, err
+	}
 	defer session.mu.Unlock()
 	if session.closed {
 		return Response{}, ErrSessionClosed
@@ -403,7 +408,9 @@ func (session *Session) WaitURC(
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	session.mu.Lock()
+	if err := session.mu.LockContext(ctx); err != nil {
+		return "", err
+	}
 	defer session.mu.Unlock()
 	if session.closed {
 		return "", ErrSessionClosed

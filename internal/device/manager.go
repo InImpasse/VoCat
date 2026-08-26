@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"vocat/internal/ctxlock"
 	"vocat/internal/modem"
 	"vocat/internal/pcsc"
 )
@@ -83,7 +84,7 @@ type ussdSession struct {
 }
 
 type managedDevice struct {
-	opMu               sync.Mutex
+	opMu               ctxlock.Mutex
 	dataMu             sync.Mutex
 	dataSession        qmiDataSession
 	dataSessionHandle  uint32
@@ -519,7 +520,9 @@ func (manager *Manager) Refresh(ctx context.Context, id string) (Snapshot, error
 	if err != nil {
 		return Snapshot{}, err
 	}
-	state.opMu.Lock()
+	if err := state.opMu.LockContext(ctx); err != nil {
+		return Snapshot{}, err
+	}
 	defer state.opMu.Unlock()
 	if err := manager.validateActive(id, state); err != nil {
 		return Snapshot{}, err
@@ -631,7 +634,9 @@ func (manager *Manager) ExecuteAT(
 	if err != nil {
 		return modem.Response{}, err
 	}
-	state.opMu.Lock()
+	if err := state.opMu.LockContext(ctx); err != nil {
+		return modem.Response{}, err
+	}
 	defer state.opMu.Unlock()
 	if err := manager.validateActive(id, state); err != nil {
 		return modem.Response{}, err
@@ -661,7 +666,9 @@ func (manager *Manager) ExecuteSensitiveAT(
 	if err != nil {
 		return modem.Response{}, err
 	}
-	state.opMu.Lock()
+	if err := state.opMu.LockContext(ctx); err != nil {
+		return modem.Response{}, err
+	}
 	defer state.opMu.Unlock()
 	if err := manager.validateActive(id, state); err != nil {
 		return modem.Response{}, err

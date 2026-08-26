@@ -87,7 +87,9 @@ func (manager *Manager) CancelUSSD(ctx context.Context, sessionID string) error 
 	if err != nil {
 		return err
 	}
-	state.opMu.Lock()
+	if err := state.opMu.LockContext(ctx); err != nil {
+		return err
+	}
 	defer state.opMu.Unlock()
 	if err := manager.validateActive(deviceID, state); err != nil {
 		return err
@@ -269,7 +271,9 @@ func (manager *Manager) SetFlight(
 	if err != nil {
 		return FlightResult{}, err
 	}
-	state.opMu.Lock()
+	if err := state.opMu.LockContext(ctx); err != nil {
+		return FlightResult{}, err
+	}
 	defer state.opMu.Unlock()
 	if err := manager.validateActive(id, state); err != nil {
 		return FlightResult{}, err

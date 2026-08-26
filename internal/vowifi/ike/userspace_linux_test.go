@@ -21,7 +21,9 @@ func TestUserspaceDataplaneDiagnosticsClassifyDrops(t *testing.T) {
 	counters.recordReceived()
 	counters.recordAccepted()
 	counters.recordInnerPacket([]byte{0x45, 0, 0, 0, 0, 0, 0, 0, 0, 6})
-	counters.recordInnerPacket([]byte{0x60, 0, 0, 0, 0, 0, 17})
+	ipv6UDP := make([]byte, 40)
+	ipv6UDP[0], ipv6UDP[6] = 0x60, 17
+	counters.recordInnerPacket(ipv6UDP)
 	counters.recordDrop(errESPAuthentication)
 	counters.recordDrop(errESPReplay)
 	counters.recordDrop(errESPPolicyDrop)
@@ -55,6 +57,17 @@ func TestUserspaceDataplaneDiagnosticsAreConcurrentAndSaturating(t *testing.T) {
 	counters.recordReceived()
 	if got := counters.snapshot().ReceivedESP; got != math.MaxUint64 {
 		t.Fatalf("saturated received ESP = %d", got)
+	}
+}
+
+func TestIPv6UpperLayerProtocolWalksExtensions(t *testing.T) {
+	packet := make([]byte, 56)
+	packet[0], packet[6] = 0x60, 0
+	packet[40], packet[41] = 44, 0
+	packet[48] = 6
+	protocol, fragmented, ok := ipv6UpperLayerProtocol(packet)
+	if !ok || !fragmented || protocol != 6 {
+		t.Fatalf("IPv6 protocol = (%d, %v, %v)", protocol, fragmented, ok)
 	}
 }
 

@@ -88,6 +88,9 @@ type DataplaneDiagnostics struct {
 	InboundIPv6         uint64 `json:"inbound_ipv6"`
 	InboundTCP          uint64 `json:"inbound_tcp"`
 	InboundUDP          uint64 `json:"inbound_udp"`
+	InboundICMPv6       uint64 `json:"inbound_icmpv6"`
+	InboundIPv6Fragment uint64 `json:"inbound_ipv6_fragment"`
+	InboundOther        uint64 `json:"inbound_other"`
 	AuthenticationDrops uint64 `json:"authentication_drops"`
 	ReplayDrops         uint64 `json:"replay_drops"`
 	PolicyDrops         uint64 `json:"policy_drops"`

@@ -58,6 +58,9 @@ type userspaceDataplaneCounters struct {
 	inboundIPv6         atomic.Uint64
 	inboundTCP          atomic.Uint64
 	inboundUDP          atomic.Uint64
+	inboundICMPv6       atomic.Uint64
+	inboundIPv6Fragment atomic.Uint64
+	inboundOther        atomic.Uint64
 	authenticationDrops atomic.Uint64
 	replayDrops         atomic.Uint64
 	policyDrops         atomic.Uint64
@@ -100,24 +103,70 @@ func (counters *userspaceDataplaneCounters) recordInnerPacket(packet []byte) {
 	case 4:
 		incrementSaturating(&counters.inboundIPv4)
 		if len(packet) >= 10 {
-			switch packet[9] {
-			case 6:
-				incrementSaturating(&counters.inboundTCP)
-			case 17:
-				incrementSaturating(&counters.inboundUDP)
-			}
+			counters.recordInnerProtocol(packet[9])
 		}
 	case 6:
 		incrementSaturating(&counters.inboundIPv6)
-		if len(packet) >= 7 {
-			switch packet[6] {
-			case 6:
-				incrementSaturating(&counters.inboundTCP)
-			case 17:
-				incrementSaturating(&counters.inboundUDP)
+		if protocol, fragmented, ok := ipv6UpperLayerProtocol(packet); ok {
+			if fragmented {
+				incrementSaturating(&counters.inboundIPv6Fragment)
 			}
+			counters.recordInnerProtocol(protocol)
+		}
+	default:
+		incrementSaturating(&counters.inboundOther)
+	}
+}
+
+func (counters *userspaceDataplaneCounters) recordInnerProtocol(protocol byte) {
+	switch protocol {
+	case 6:
+		incrementSaturating(&counters.inboundTCP)
+	case 17:
+		incrementSaturating(&counters.inboundUDP)
+	case 58:
+		incrementSaturating(&counters.inboundICMPv6)
+	default:
+		incrementSaturating(&counters.inboundOther)
+	}
+}
+
+func ipv6UpperLayerProtocol(packet []byte) (protocol byte, fragmented bool, ok bool) {
+	if len(packet) < 40 || packet[0]>>4 != 6 {
+		return 0, false, false
+	}
+	protocol, offset := packet[6], 40
+	for steps := 0; steps < 8; steps++ {
+		switch protocol {
+		case 0, 43, 60:
+			if offset+2 > len(packet) {
+				return 0, fragmented, false
+			}
+			length := (int(packet[offset+1]) + 1) * 8
+			if length < 8 || offset+length > len(packet) {
+				return 0, fragmented, false
+			}
+			protocol, offset = packet[offset], offset+length
+		case 44:
+			if offset+8 > len(packet) {
+				return 0, true, false
+			}
+			fragmented = true
+			protocol, offset = packet[offset], offset+8
+		case 51:
+			if offset+2 > len(packet) {
+				return 0, fragmented, false
+			}
+			length := (int(packet[offset+1]) + 2) * 4
+			if length < 8 || offset+length > len(packet) {
+				return 0, fragmented, false
+			}
+			protocol, offset = packet[offset], offset+length
+		default:
+			return protocol, fragmented, true
 		}
 	}
+	return 0, fragmented, false
 }
 
 func (counters *userspaceDataplaneCounters) recordDrop(err error) {
@@ -138,6 +187,8 @@ func (counters *userspaceDataplaneCounters) snapshot() vowifi.DataplaneDiagnosti
 		ReceivedESP: counters.receivedESP.Load(), AcceptedESP: counters.acceptedESP.Load(),
 		InboundIPv4: counters.inboundIPv4.Load(), InboundIPv6: counters.inboundIPv6.Load(),
 		InboundTCP: counters.inboundTCP.Load(), InboundUDP: counters.inboundUDP.Load(),
+		InboundICMPv6: counters.inboundICMPv6.Load(), InboundIPv6Fragment: counters.inboundIPv6Fragment.Load(),
+		InboundOther:        counters.inboundOther.Load(),
 		AuthenticationDrops: counters.authenticationDrops.Load(), ReplayDrops: counters.replayDrops.Load(),
 		PolicyDrops: counters.policyDrops.Load(), MalformedDrops: counters.malformedDrops.Load(),
 	}

@@ -31,6 +31,13 @@ export interface ApiErrorBody {
 export interface DataplaneDiagnostics {
   receivedEsp: number;
   acceptedEsp: number;
+  inboundIpv4: number;
+  inboundIpv6: number;
+  inboundTcp: number;
+  inboundUdp: number;
+  inboundIcmpv6: number;
+  inboundIpv6Fragment: number;
+  inboundOther: number;
   authenticationDrops: number;
   replayDrops: number;
   policyDrops: number;

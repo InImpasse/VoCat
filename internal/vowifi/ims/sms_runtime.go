@@ -1015,7 +1015,7 @@ func (session *Session) SendSMS(ctx context.Context, request vowifi.SMSSubmitReq
 	session.logOutboundSMS(slog.LevelInfo, "IMS outbound SMS submission started",
 		"stage", "prepare", "parts", len(parts), "smsc_source", smscSource,
 		"recipient_type", smsRecipientType(parts[0].To))
-	psi := "tel:" + normalizeE164(smsc)
+	psi := smsRequestTarget(vowifi.ResolveCarrierProfile(session.request.Identity), session.identity.domain, smsc)
 	for _, part := range parts {
 		reference := session.allocateRPReference()
 		if len(part.TPDU) < 2 {
@@ -1075,6 +1075,16 @@ func smsCenterForIdentity(config Config, identity vowifi.SIMIdentity) string {
 		return configured
 	}
 	return strings.TrimSpace(vowifi.ResolveCarrierProfile(identity).SMSCenter)
+}
+
+func smsRequestTarget(profile vowifi.CarrierProfile, homeDomain, smsc string) string {
+	smsc = normalizeE164(smsc)
+	homeDomain = strings.TrimSpace(homeDomain)
+	if profile.SMSRequestURI == vowifi.SMSRequestURISIPHomeDomain &&
+		homeDomain != "" && !strings.ContainsAny(homeDomain, "\r\n") {
+		return "sip:" + smsc + "@" + homeDomain + ";user=phone"
+	}
+	return "tel:" + smsc
 }
 
 func smsRecipientType(recipient string) string {

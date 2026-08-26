@@ -80,6 +80,26 @@ func TestResolveCarrierProfileATT(t *testing.T) {
 	}
 }
 
+func TestResolveCarrierProfileUsesTMobileSMSHomeDomainURI(t *testing.T) {
+	profile := ResolveCarrierProfile(SIMIdentity{
+		HomeMCC: "310", HomeMNC: "260", GID1: "54",
+	})
+	if profile.ID != "ipcc-t-mobile-310160" || profile.SMSRequestURI != SMSRequestURISIPHomeDomain {
+		t.Fatalf("T-Mobile SMS profile = %#v", profile)
+	}
+}
+
+func TestCarrierProfileRejectsUnknownSMSRequestURI(t *testing.T) {
+	rule := carrierProfileRule{
+		ID:    "invalid-sms-uri",
+		Match: carrierProfileMatch{HomePLMNs: []string{"00101"}},
+		IMS:   carrierProfileIMS{SMSRequestURI: "unknown"},
+	}
+	if validCarrierProfileRule(rule) {
+		t.Fatal("carrier profile accepted an unknown SMS request URI mode")
+	}
+}
+
 func TestResolveCarrierProfileRedPocketOutranksBroadATTICCID(t *testing.T) {
 	profile := ResolveCarrierProfile(SIMIdentity{
 		ICCID: "8901410000000000001", IMSI: "310170000000001",

@@ -254,6 +254,17 @@ func TestSMSCenterForIdentityUsesExactPLMN(t *testing.T) {
 	}
 }
 
+func TestSMSRequestTargetUsesTMobileHomeDomainOnlyWhenConfigured(t *testing.T) {
+	identity := vowifi.SIMIdentity{HomeMCC: "310", HomeMNC: "260", GID1: "54"}
+	profile := vowifi.ResolveCarrierProfile(identity)
+	if got := smsRequestTarget(profile, "ims.mnc260.mcc310.3gppnetwork.org", "+12065550100"); got != "sip:+12065550100@ims.mnc260.mcc310.3gppnetwork.org;user=phone" {
+		t.Fatalf("T-Mobile SMS target = %q", got)
+	}
+	if got := smsRequestTarget(vowifi.CarrierProfile{}, "ims.example.test", "+12345"); got != "tel:+12345" {
+		t.Fatalf("standard SMS target = %q", got)
+	}
+}
+
 func TestSMSCenterForIdentityFallsBackToCarrierProfile(t *testing.T) {
 	// Explicit SIM SMSC always takes precedence
 	explicit := smsCenterForIdentity(Config{}, vowifi.SIMIdentity{

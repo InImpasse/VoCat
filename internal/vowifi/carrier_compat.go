@@ -42,6 +42,7 @@ type CarrierProfile struct {
 	IMSRegisterProfile                 string
 	IMSIPSecEncryption                 string
 	SMSCenter                          string
+	SMSRequestURI                      string
 	PANIEnabled                        *bool
 	PANICountry                        string
 	PANINode                           string
@@ -118,6 +119,7 @@ type carrierProfileIMS struct {
 	RegisterProfile                    string                        `json:"register_profile,omitempty"`
 	IPSecEncryption                    string                        `json:"ipsec_encryption,omitempty"`
 	SMSCenter                          string                        `json:"sms_center,omitempty"`
+	SMSRequestURI                      string                        `json:"sms_request_uri,omitempty"`
 	PANIEnabled                        *bool                         `json:"pani_enabled,omitempty"`
 	PANICountry                        string                        `json:"pani_country,omitempty"`
 	PANINode                           string                        `json:"pani_node,omitempty"`
@@ -146,6 +148,8 @@ type carrierProfileRegisterOptions struct {
 var carrierProfilesJSON []byte
 
 var builtinCarrierProfiles = mustLoadCarrierProfiles(carrierProfilesJSON)
+
+const SMSRequestURISIPHomeDomain = "sip_home_domain"
 
 var externalCarrierProfiles = struct {
 	sync.RWMutex
@@ -322,6 +326,9 @@ func validCarrierProfileRule(rule carrierProfileRule) bool {
 	}
 	if encryption := strings.ToLower(strings.TrimSpace(rule.IMS.IPSecEncryption)); encryption != "" &&
 		encryption != "aes-cbc" && encryption != "null" {
+		return false
+	}
+	if value := strings.ToLower(strings.TrimSpace(rule.IMS.SMSRequestURI)); value != "" && value != SMSRequestURISIPHomeDomain {
 		return false
 	}
 	if country := strings.ToUpper(strings.TrimSpace(rule.IMS.PANICountry)); country != "" &&
@@ -592,6 +599,7 @@ func applyCarrierProfileRule(base CarrierProfile, rule carrierProfileRule, sourc
 		base.IMSIPSecEncryption = value
 	}
 	base.SMSCenter = strings.TrimSpace(rule.IMS.SMSCenter)
+	base.SMSRequestURI = strings.ToLower(strings.TrimSpace(rule.IMS.SMSRequestURI))
 	if rule.IMS.PANIEnabled != nil {
 		enabled := *rule.IMS.PANIEnabled
 		base.PANIEnabled = &enabled

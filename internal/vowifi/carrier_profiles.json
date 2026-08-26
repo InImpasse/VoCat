@@ -8389,7 +8389,8 @@
         "proposal": "modern"
       },
       "ims": {
-        "ipsec_encryption": "aes-cbc"
+        "ipsec_encryption": "aes-cbc",
+        "sms_request_uri": "sip_home_domain"
       }
     },
     {

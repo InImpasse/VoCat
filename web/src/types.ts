@@ -47,6 +47,12 @@ export interface DataplaneDiagnostics {
 }
 
 export interface SMSDiagnostics {
+  protectedTcpReads: number;
+  protectedTcpBytes: number;
+  protectedTcpAccepts: number;
+  protectedUdpReads: number;
+  protectedUdpBytes: number;
+  sipPackets: number;
   sipMessages: number;
   rpData: number;
   rpAck: number;

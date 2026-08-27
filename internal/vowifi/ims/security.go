@@ -661,11 +661,9 @@ func xfrmFlows(config IPSecSAConfig) []xfrmFlow {
 		{
 			description: "P-CSCF-client to UE-server", family: family,
 			sourcePrefix: remotePrefix, destinationPrefix: localPrefix,
-			sourcePort: 0, destinationPort: 0,
+			sourcePort: 0, destinationPort: config.UEServerPort,
 			direction: "in", templateSource: config.RemoteIP, templateDestination: config.LocalIP,
 			spi: config.UEServerSPI, reqid: serverPairReqID(config),
-			// Keep exact P-CSCF/SPI/reqid constraints while allowing carrier
-			// variations in the inner protected MESSAGE port.
 			protocols: []string{"tcp", "udp"},
 		},
 		{
@@ -892,7 +890,7 @@ func (session *Session) activateIPSec(
 
 	session.conn = connection
 	if session.transport == "tcp" {
-		session.reader = bufio.NewReader(connection)
+		session.reader = bufio.NewReader(protectedTCPReader{reader: connection, diagnostics: &session.smsDiagnostics})
 	} else {
 		session.reader = nil
 	}

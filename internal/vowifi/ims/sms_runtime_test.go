@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"mime/multipart"
 	"net"
 	"net/textproto"
@@ -183,14 +184,25 @@ func TestSupportsSMSContentType(t *testing.T) {
 
 func TestSMSDiagnosticsCountMessageAndRPStages(t *testing.T) {
 	session := &Session{}
+	session.smsDiagnostics.recordTCPRead(10)
+	session.smsDiagnostics.recordUDPRead(20)
+	addSaturating(&session.smsDiagnostics.protectedTCPAccepts, 1)
+	addSaturating(&session.smsDiagnostics.sipPackets, 2)
 	session.smsDiagnostics.sipMessages.Add(2)
 	session.smsDiagnostics.rpAck.Add(1)
 	session.smsDiagnostics.rpData.Add(3)
 	session.smsDiagnostics.statusReports.Add(1)
 	session.smsDiagnostics.smsProcessed.Add(2)
 	got := session.smsDiagnostics.snapshot()
-	if got.SIPMessages != 2 || got.RPAck != 1 || got.RPData != 3 || got.StatusReports != 1 || got.SMSProcessed != 2 {
+	if got.ProtectedTCPReads != 1 || got.ProtectedTCPBytes != 10 || got.ProtectedTCPAccepts != 1 ||
+		got.ProtectedUDPReads != 1 || got.ProtectedUDPBytes != 20 || got.SIPPackets != 2 ||
+		got.SIPMessages != 2 || got.RPAck != 1 || got.RPData != 3 || got.StatusReports != 1 || got.SMSProcessed != 2 {
 		t.Fatalf("SMS diagnostics = %#v", got)
+	}
+	session.smsDiagnostics.protectedTCPBytes.Store(math.MaxUint64)
+	session.smsDiagnostics.recordTCPRead(1)
+	if got := session.smsDiagnostics.snapshot().ProtectedTCPBytes; got != math.MaxUint64 {
+		t.Fatalf("saturated TCP bytes = %d", got)
 	}
 }
 

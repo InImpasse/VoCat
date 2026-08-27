@@ -632,19 +632,57 @@ type Session struct {
 }
 
 type atomicSMSDiagnostics struct {
-	sipMessages   atomic.Uint64
-	rpData        atomic.Uint64
-	rpAck         atomic.Uint64
-	statusReports atomic.Uint64
-	smsProcessed  atomic.Uint64
+	protectedTCPReads   atomic.Uint64
+	protectedTCPBytes   atomic.Uint64
+	protectedTCPAccepts atomic.Uint64
+	protectedUDPReads   atomic.Uint64
+	protectedUDPBytes   atomic.Uint64
+	sipPackets          atomic.Uint64
+	sipMessages         atomic.Uint64
+	rpData              atomic.Uint64
+	rpAck               atomic.Uint64
+	statusReports       atomic.Uint64
+	smsProcessed        atomic.Uint64
 }
 
 func (diagnostics *atomicSMSDiagnostics) snapshot() vowifi.SMSDiagnostics {
 	return vowifi.SMSDiagnostics{
+		ProtectedTCPReads: diagnostics.protectedTCPReads.Load(), ProtectedTCPBytes: diagnostics.protectedTCPBytes.Load(),
+		ProtectedTCPAccepts: diagnostics.protectedTCPAccepts.Load(), ProtectedUDPReads: diagnostics.protectedUDPReads.Load(),
+		ProtectedUDPBytes: diagnostics.protectedUDPBytes.Load(), SIPPackets: diagnostics.sipPackets.Load(),
 		SIPMessages: diagnostics.sipMessages.Load(), RPData: diagnostics.rpData.Load(),
 		RPAck: diagnostics.rpAck.Load(), StatusReports: diagnostics.statusReports.Load(),
 		SMSProcessed: diagnostics.smsProcessed.Load(),
 	}
+}
+
+func addSaturating(counter *atomic.Uint64, amount uint64) {
+	for {
+		current := counter.Load()
+		next := current + amount
+		if next < current {
+			next = ^uint64(0)
+		}
+		if counter.CompareAndSwap(current, next) {
+			return
+		}
+	}
+}
+
+func (diagnostics *atomicSMSDiagnostics) recordTCPRead(count int) {
+	if count <= 0 {
+		return
+	}
+	addSaturating(&diagnostics.protectedTCPReads, 1)
+	addSaturating(&diagnostics.protectedTCPBytes, uint64(count))
+}
+
+func (diagnostics *atomicSMSDiagnostics) recordUDPRead(count int) {
+	if count <= 0 {
+		return
+	}
+	addSaturating(&diagnostics.protectedUDPReads, 1)
+	addSaturating(&diagnostics.protectedUDPBytes, uint64(count))
 }
 
 func newSession(

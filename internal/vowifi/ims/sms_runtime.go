@@ -98,6 +98,17 @@ type sipTransactionKey struct {
 	method string
 }
 
+type protectedTCPReader struct {
+	reader      io.Reader
+	diagnostics *atomicSMSDiagnostics
+}
+
+func (reader protectedTCPReader) Read(buffer []byte) (int, error) {
+	count, err := reader.reader.Read(buffer)
+	reader.diagnostics.recordTCPRead(count)
+	return count, err
+}
+
 func (session *Session) startRuntimeReceivers() error {
 	if session.runtimeStarted {
 		return nil
@@ -166,6 +177,7 @@ func (session *Session) acceptProtectedTCP() {
 			}
 			return
 		}
+		addSaturating(&session.smsDiagnostics.protectedTCPAccepts, 1)
 		if !session.validProtectedTCPSource(connection.RemoteAddr()) {
 			session.logInboundSMS(slog.LevelWarn, "IMS inbound TCP rejected", nil,
 				"stage", "source_filter", "remote", connection.RemoteAddr().String())
@@ -188,7 +200,7 @@ func (session *Session) readInboundTCP(connection net.Conn) {
 		session.inboundMu.Unlock()
 		_ = connection.Close()
 	}()
-	reader := bufio.NewReader(connection)
+	reader := bufio.NewReader(protectedTCPReader{reader: connection, diagnostics: &session.smsDiagnostics})
 	for {
 		packet, err := readSIPPacket(reader)
 		if err != nil {
@@ -217,6 +229,7 @@ func (session *Session) readProtectedUDP() {
 			}
 			return
 		}
+		session.smsDiagnostics.recordUDPRead(count)
 		if !session.validProtectedUDPSource(remote) {
 			session.logInboundSMS(slog.LevelWarn, "IMS inbound UDP rejected", nil,
 				"stage", "source_filter", "remote", remote.String(), "packet_bytes", count)
@@ -248,6 +261,7 @@ func (session *Session) validProtectedTCPSource(address net.Addr) bool {
 }
 
 func (session *Session) dispatchPacket(packet sipPacket, respond func([]byte) error) {
+	addSaturating(&session.smsDiagnostics.sipPackets, 1)
 	if packet.Response != nil {
 		response := packet.Response
 		cseq, method, err := cseqNumber(response.value("CSeq"))

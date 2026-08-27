@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"vocat/internal/vowifi"
@@ -623,10 +624,27 @@ type Session struct {
 	closed              bool
 	evidence            vowifi.IMSEvidence
 	smsContactConfirmed bool
+	smsDiagnostics      atomicSMSDiagnostics
 	expiresAt           time.Time
 	refreshContext      context.Context
 	refreshCancel       context.CancelFunc
 	refreshDone         chan struct{}
+}
+
+type atomicSMSDiagnostics struct {
+	sipMessages   atomic.Uint64
+	rpData        atomic.Uint64
+	rpAck         atomic.Uint64
+	statusReports atomic.Uint64
+	smsProcessed  atomic.Uint64
+}
+
+func (diagnostics *atomicSMSDiagnostics) snapshot() vowifi.SMSDiagnostics {
+	return vowifi.SMSDiagnostics{
+		SIPMessages: diagnostics.sipMessages.Load(), RPData: diagnostics.rpData.Load(),
+		RPAck: diagnostics.rpAck.Load(), StatusReports: diagnostics.statusReports.Load(),
+		SMSProcessed: diagnostics.smsProcessed.Load(),
+	}
 }
 
 func newSession(
@@ -1553,6 +1571,7 @@ func (session *Session) Evidence() vowifi.IMSEvidence {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	evidence := cloneEvidence(session.evidence)
+	evidence.SMSDiagnostics = session.smsDiagnostics.snapshot()
 	if session.closed {
 		evidence.Registered = false
 		evidence.RegistrationState = "closed"

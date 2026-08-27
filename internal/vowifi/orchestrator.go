@@ -74,12 +74,17 @@ func (orchestrator *Orchestrator) State() State {
 	snapshot := orchestrator.state.clone()
 	resources := orchestrator.resources
 	var tunnel TunnelSession
+	var ims IMSSession
 	if resources != nil {
 		tunnel = resources.tunnel
+		ims = resources.ims
 	}
 	orchestrator.mu.Unlock()
 	if tunnel != nil {
 		snapshot.DataplaneDiagnostics = tunnel.Evidence().DataplaneDiagnostics
+	}
+	if ims != nil {
+		snapshot.SMSDiagnostics = ims.Evidence().SMSDiagnostics
 	}
 	return snapshot
 }

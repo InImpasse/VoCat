@@ -392,6 +392,7 @@ func TestEnableUsesEvidenceBackedOrderAndDisableRollsBackInReverse(t *testing.T)
 		"phone.save",
 		"ims.sms",
 		"tunnel.evidence",
+		"ims.evidence",
 	}
 	if calls := environment.callsSnapshot(); !reflect.DeepEqual(calls, wantEnableCalls) {
 		t.Fatalf("enable calls = %#v, want %#v", calls, wantEnableCalls)

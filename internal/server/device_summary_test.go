@@ -22,6 +22,9 @@ func TestLiveVoWiFiRuntimeExposesOnlySafeDataplaneDiagnostics(t *testing.T) {
 	if !ok || diagnostics.ReceivedESP != 7 || diagnostics.AcceptedESP != 5 {
 		t.Fatalf("dataplane diagnostics = %#v", runtime["dataplane_diagnostics"])
 	}
+	if _, ok := runtime["sms_diagnostics"].(vowifi.SMSDiagnostics); !ok {
+		t.Fatalf("SMS diagnostics = %#v", runtime["sms_diagnostics"])
+	}
 	encoded, err := json.Marshal(diagnostics)
 	if err != nil {
 		t.Fatal(err)

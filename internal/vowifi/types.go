@@ -84,10 +84,22 @@ type SecurityAudit struct {
 type DataplaneDiagnostics struct {
 	ReceivedESP         uint64 `json:"received_esp"`
 	AcceptedESP         uint64 `json:"accepted_esp"`
+	InboundIPv4         uint64 `json:"inbound_ipv4"`
+	InboundIPv6         uint64 `json:"inbound_ipv6"`
+	InboundTCP          uint64 `json:"inbound_tcp"`
+	InboundUDP          uint64 `json:"inbound_udp"`
 	AuthenticationDrops uint64 `json:"authentication_drops"`
 	ReplayDrops         uint64 `json:"replay_drops"`
 	PolicyDrops         uint64 `json:"policy_drops"`
 	MalformedDrops      uint64 `json:"malformed_drops"`
+}
+
+type SMSDiagnostics struct {
+	SIPMessages   uint64 `json:"sip_messages"`
+	RPData        uint64 `json:"rp_data"`
+	RPAck         uint64 `json:"rp_ack"`
+	StatusReports uint64 `json:"status_reports"`
+	SMSProcessed  uint64 `json:"sms_processed"`
 }
 
 // State is an immutable snapshot when returned by Orchestrator.State or a
@@ -116,6 +128,7 @@ type State struct {
 	TunnelName           string               `json:"tunnel_name,omitempty"`
 	DataplaneMode        string               `json:"dataplane_mode,omitempty"`
 	DataplaneDiagnostics DataplaneDiagnostics `json:"dataplane_diagnostics"`
+	SMSDiagnostics       SMSDiagnostics       `json:"sms_diagnostics"`
 	IMSRegistration      string               `json:"ims_registration,omitempty"`
 	PhoneNumber          string               `json:"phone_number,omitempty"`
 	PhoneNumberSource    string               `json:"phone_number_source,omitempty"`
@@ -274,6 +287,7 @@ type IMSEvidence struct {
 	LastSIPCode          int
 	SecurityMode         string
 	SecurityVerified     bool
+	SMSDiagnostics       SMSDiagnostics
 }
 
 type SMSEvidence struct {

@@ -370,6 +370,9 @@ func (session *Session) handleSIPRequest(request *sipRequest, respond func([]byt
 		return
 	}
 	status := 200
+	if request.Method == "MESSAGE" {
+		session.smsDiagnostics.sipMessages.Add(1)
+	}
 	ussiMessage := false
 	switch request.Method {
 	case "OPTIONS":
@@ -488,6 +491,9 @@ func (session *Session) processSMSMessage(request *sipRequest) {
 		return
 	}
 	if rpdu.messageType != 1 { // RP-DATA, network to MS.
+		if rpdu.messageType == 3 {
+			session.smsDiagnostics.rpAck.Add(1)
+		}
 		session.logInboundSMS(slog.LevelInfo, "IMS inbound SMS control message received", request,
 			"stage", "rpdu", "payload_source", payloadSource,
 			"rp_message_type", int(rpdu.messageType), "rp_reference", int(rpdu.reference))
@@ -495,6 +501,7 @@ func (session *Session) processSMSMessage(request *sipRequest) {
 	}
 
 	message, decodeErr := device.DecodeSMSDeliverTPDU(rpdu.tpdu)
+	session.smsDiagnostics.rpData.Add(1)
 	receivedAt := time.Now().UTC()
 	callID := strings.TrimSpace(request.value("Call-ID"))
 	carrierProfile := vowifi.ResolveCarrierProfile(session.request.Identity)
@@ -509,6 +516,7 @@ func (session *Session) processSMSMessage(request *sipRequest) {
 
 	switch {
 	case message.Direction == device.SMSDirectionStatusReport:
+		session.smsDiagnostics.statusReports.Add(1)
 		status := ReceivedSMSStatus{
 			DeviceID:               session.request.DeviceID,
 			IMSI:                   session.request.Identity.IMSI,
@@ -575,6 +583,7 @@ func (session *Session) processSMSMessage(request *sipRequest) {
 			session.sendLoggedDeliveryReport(request, buildRPError(rpdu.reference, 22), "rp_error")
 			return
 		}
+		session.smsDiagnostics.smsProcessed.Add(1)
 		session.logInboundSMS(slog.LevelInfo, "IMS inbound SMS processed", request,
 			"stage", "sms_callback", "payload_source", payloadSource,
 			"rp_reference", int(rpdu.reference), "encoding", message.Encoding,

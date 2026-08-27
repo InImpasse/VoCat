@@ -54,6 +54,10 @@ type linuxUserspaceHandle struct {
 type userspaceDataplaneCounters struct {
 	receivedESP         atomic.Uint64
 	acceptedESP         atomic.Uint64
+	inboundIPv4         atomic.Uint64
+	inboundIPv6         atomic.Uint64
+	inboundTCP          atomic.Uint64
+	inboundUDP          atomic.Uint64
 	authenticationDrops atomic.Uint64
 	replayDrops         atomic.Uint64
 	policyDrops         atomic.Uint64
@@ -88,6 +92,34 @@ func (counters *userspaceDataplaneCounters) recordAccepted() {
 	incrementSaturating(&counters.acceptedESP)
 }
 
+func (counters *userspaceDataplaneCounters) recordInnerPacket(packet []byte) {
+	if len(packet) == 0 {
+		return
+	}
+	switch packet[0] >> 4 {
+	case 4:
+		incrementSaturating(&counters.inboundIPv4)
+		if len(packet) >= 10 {
+			switch packet[9] {
+			case 6:
+				incrementSaturating(&counters.inboundTCP)
+			case 17:
+				incrementSaturating(&counters.inboundUDP)
+			}
+		}
+	case 6:
+		incrementSaturating(&counters.inboundIPv6)
+		if len(packet) >= 7 {
+			switch packet[6] {
+			case 6:
+				incrementSaturating(&counters.inboundTCP)
+			case 17:
+				incrementSaturating(&counters.inboundUDP)
+			}
+		}
+	}
+}
+
 func (counters *userspaceDataplaneCounters) recordDrop(err error) {
 	switch {
 	case errors.Is(err, errESPAuthentication):
@@ -104,6 +136,8 @@ func (counters *userspaceDataplaneCounters) recordDrop(err error) {
 func (counters *userspaceDataplaneCounters) snapshot() vowifi.DataplaneDiagnostics {
 	return vowifi.DataplaneDiagnostics{
 		ReceivedESP: counters.receivedESP.Load(), AcceptedESP: counters.acceptedESP.Load(),
+		InboundIPv4: counters.inboundIPv4.Load(), InboundIPv6: counters.inboundIPv6.Load(),
+		InboundTCP: counters.inboundTCP.Load(), InboundUDP: counters.inboundUDP.Load(),
 		AuthenticationDrops: counters.authenticationDrops.Load(), ReplayDrops: counters.replayDrops.Load(),
 		PolicyDrops: counters.policyDrops.Load(), MalformedDrops: counters.malformedDrops.Load(),
 	}
@@ -595,6 +629,7 @@ func (handle *linuxUserspaceHandle) copyRelayToTUN() {
 			}
 			return
 		}
+		handle.diagnostics.recordInnerPacket(cleartext)
 		handle.diagnostics.recordAccepted()
 	}
 }

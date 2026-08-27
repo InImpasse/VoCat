@@ -181,6 +181,19 @@ func TestSupportsSMSContentType(t *testing.T) {
 	}
 }
 
+func TestSMSDiagnosticsCountMessageAndRPStages(t *testing.T) {
+	session := &Session{}
+	session.smsDiagnostics.sipMessages.Add(2)
+	session.smsDiagnostics.rpAck.Add(1)
+	session.smsDiagnostics.rpData.Add(3)
+	session.smsDiagnostics.statusReports.Add(1)
+	session.smsDiagnostics.smsProcessed.Add(2)
+	got := session.smsDiagnostics.snapshot()
+	if got.SIPMessages != 2 || got.RPAck != 1 || got.RPData != 3 || got.StatusReports != 1 || got.SMSProcessed != 2 {
+		t.Fatalf("SMS diagnostics = %#v", got)
+	}
+}
+
 func TestSupportsUSSIContentType(t *testing.T) {
 	for _, test := range []struct {
 		value string

@@ -20,13 +20,15 @@ func TestUserspaceDataplaneDiagnosticsClassifyDrops(t *testing.T) {
 	var counters userspaceDataplaneCounters
 	counters.recordReceived()
 	counters.recordAccepted()
+	counters.recordInnerPacket([]byte{0x45, 0, 0, 0, 0, 0, 0, 0, 0, 6})
+	counters.recordInnerPacket([]byte{0x60, 0, 0, 0, 0, 0, 17})
 	counters.recordDrop(errESPAuthentication)
 	counters.recordDrop(errESPReplay)
 	counters.recordDrop(errESPPolicyDrop)
 	counters.recordDrop(errors.New("malformed"))
 
 	got := counters.snapshot()
-	if got.ReceivedESP != 1 || got.AcceptedESP != 1 ||
+	if got.ReceivedESP != 1 || got.AcceptedESP != 1 || got.InboundIPv4 != 1 || got.InboundIPv6 != 1 || got.InboundTCP != 1 || got.InboundUDP != 1 ||
 		got.AuthenticationDrops != 1 || got.ReplayDrops != 1 ||
 		got.PolicyDrops != 1 || got.MalformedDrops != 1 {
 		t.Fatalf("diagnostics = %#v", got)

@@ -37,6 +37,14 @@ export interface DataplaneDiagnostics {
   malformedDrops: number;
 }
 
+export interface SMSDiagnostics {
+  sipMessages: number;
+  rpData: number;
+  rpAck: number;
+  statusReports: number;
+  smsProcessed: number;
+}
+
 export interface VoWiFiRuntime {
   deviceId: string;
   phase: string;
@@ -46,6 +54,7 @@ export interface VoWiFiRuntime {
   carrierProfileFrom?: string;
   dataplaneMode: string;
   dataplaneDiagnostics: DataplaneDiagnostics;
+  smsDiagnostics: SMSDiagnostics;
   iccid: string;
   imsi: string;
   simReady: boolean;

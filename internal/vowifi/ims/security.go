@@ -661,9 +661,11 @@ func xfrmFlows(config IPSecSAConfig) []xfrmFlow {
 		{
 			description: "P-CSCF-client to UE-server", family: family,
 			sourcePrefix: remotePrefix, destinationPrefix: localPrefix,
-			sourcePort: 0, destinationPort: config.UEServerPort,
+			sourcePort: 0, destinationPort: 0,
 			direction: "in", templateSource: config.RemoteIP, templateDestination: config.LocalIP,
 			spi: config.UEServerSPI, reqid: serverPairReqID(config),
+			// Keep exact P-CSCF/SPI/reqid constraints while allowing carrier
+			// variations in the inner protected MESSAGE port.
 			protocols: []string{"tcp", "udp"},
 		},
 		{

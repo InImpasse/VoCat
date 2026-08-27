@@ -24,13 +24,16 @@ func TestUserspaceDataplaneDiagnosticsClassifyDrops(t *testing.T) {
 	ipv6UDP := make([]byte, 40)
 	ipv6UDP[0], ipv6UDP[6] = 0x60, 17
 	counters.recordInnerPacket(ipv6UDP)
+	ipv6ESP := make([]byte, 40)
+	ipv6ESP[0], ipv6ESP[6] = 0x60, 50
+	counters.recordInnerPacket(ipv6ESP)
 	counters.recordDrop(errESPAuthentication)
 	counters.recordDrop(errESPReplay)
 	counters.recordDrop(errESPPolicyDrop)
 	counters.recordDrop(errors.New("malformed"))
 
 	got := counters.snapshot()
-	if got.ReceivedESP != 1 || got.AcceptedESP != 1 || got.InboundIPv4 != 1 || got.InboundIPv6 != 1 || got.InboundTCP != 1 || got.InboundUDP != 1 ||
+	if got.ReceivedESP != 1 || got.AcceptedESP != 1 || got.InboundIPv4 != 1 || got.InboundIPv6 != 2 || got.InboundTCP != 1 || got.InboundUDP != 1 || got.InboundESP != 1 ||
 		got.AuthenticationDrops != 1 || got.ReplayDrops != 1 ||
 		got.PolicyDrops != 1 || got.MalformedDrops != 1 {
 		t.Fatalf("diagnostics = %#v", got)

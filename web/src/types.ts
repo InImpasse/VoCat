@@ -36,6 +36,8 @@ export interface DataplaneDiagnostics {
   inboundTcp: number;
   inboundUdp: number;
   inboundIcmpv6: number;
+  inboundEsp: number;
+  inboundNoNextHeader: number;
   inboundIpv6Fragment: number;
   inboundOther: number;
   authenticationDrops: number;

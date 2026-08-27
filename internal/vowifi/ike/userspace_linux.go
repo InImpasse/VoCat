@@ -59,6 +59,8 @@ type userspaceDataplaneCounters struct {
 	inboundTCP          atomic.Uint64
 	inboundUDP          atomic.Uint64
 	inboundICMPv6       atomic.Uint64
+	inboundESP          atomic.Uint64
+	inboundNoNextHeader atomic.Uint64
 	inboundIPv6Fragment atomic.Uint64
 	inboundOther        atomic.Uint64
 	authenticationDrops atomic.Uint64
@@ -126,6 +128,10 @@ func (counters *userspaceDataplaneCounters) recordInnerProtocol(protocol byte) {
 		incrementSaturating(&counters.inboundUDP)
 	case 58:
 		incrementSaturating(&counters.inboundICMPv6)
+	case 50:
+		incrementSaturating(&counters.inboundESP)
+	case 59:
+		incrementSaturating(&counters.inboundNoNextHeader)
 	default:
 		incrementSaturating(&counters.inboundOther)
 	}
@@ -188,6 +194,7 @@ func (counters *userspaceDataplaneCounters) snapshot() vowifi.DataplaneDiagnosti
 		InboundIPv4: counters.inboundIPv4.Load(), InboundIPv6: counters.inboundIPv6.Load(),
 		InboundTCP: counters.inboundTCP.Load(), InboundUDP: counters.inboundUDP.Load(),
 		InboundICMPv6: counters.inboundICMPv6.Load(), InboundIPv6Fragment: counters.inboundIPv6Fragment.Load(),
+		InboundESP: counters.inboundESP.Load(), InboundNoNextHeader: counters.inboundNoNextHeader.Load(),
 		InboundOther:        counters.inboundOther.Load(),
 		AuthenticationDrops: counters.authenticationDrops.Load(), ReplayDrops: counters.replayDrops.Load(),
 		PolicyDrops: counters.policyDrops.Load(), MalformedDrops: counters.malformedDrops.Load(),

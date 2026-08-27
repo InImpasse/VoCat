@@ -625,6 +625,7 @@ type Session struct {
 	evidence            vowifi.IMSEvidence
 	smsContactConfirmed bool
 	smsDiagnostics      atomicSMSDiagnostics
+	runtimeSocketActive atomic.Bool
 	expiresAt           time.Time
 	refreshContext      context.Context
 	refreshCancel       context.CancelFunc
@@ -634,6 +635,8 @@ type Session struct {
 type atomicSMSDiagnostics struct {
 	protectedTCPReads   atomic.Uint64
 	protectedTCPBytes   atomic.Uint64
+	runtimeTCPReads     atomic.Uint64
+	runtimeTCPBytes     atomic.Uint64
 	protectedTCPAccepts atomic.Uint64
 	protectedUDPReads   atomic.Uint64
 	protectedUDPBytes   atomic.Uint64
@@ -648,6 +651,7 @@ type atomicSMSDiagnostics struct {
 func (diagnostics *atomicSMSDiagnostics) snapshot() vowifi.SMSDiagnostics {
 	return vowifi.SMSDiagnostics{
 		ProtectedTCPReads: diagnostics.protectedTCPReads.Load(), ProtectedTCPBytes: diagnostics.protectedTCPBytes.Load(),
+		RuntimeTCPReads: diagnostics.runtimeTCPReads.Load(), RuntimeTCPBytes: diagnostics.runtimeTCPBytes.Load(),
 		ProtectedTCPAccepts: diagnostics.protectedTCPAccepts.Load(), ProtectedUDPReads: diagnostics.protectedUDPReads.Load(),
 		ProtectedUDPBytes: diagnostics.protectedUDPBytes.Load(), SIPPackets: diagnostics.sipPackets.Load(),
 		SIPMessages: diagnostics.sipMessages.Load(), RPData: diagnostics.rpData.Load(),
@@ -675,6 +679,14 @@ func (diagnostics *atomicSMSDiagnostics) recordTCPRead(count int) {
 	}
 	addSaturating(&diagnostics.protectedTCPReads, 1)
 	addSaturating(&diagnostics.protectedTCPBytes, uint64(count))
+}
+
+func (diagnostics *atomicSMSDiagnostics) recordRuntimeTCPRead(count int) {
+	if count <= 0 {
+		return
+	}
+	addSaturating(&diagnostics.runtimeTCPReads, 1)
+	addSaturating(&diagnostics.runtimeTCPBytes, uint64(count))
 }
 
 func (diagnostics *atomicSMSDiagnostics) recordUDPRead(count int) {
@@ -1610,6 +1622,17 @@ func (session *Session) Evidence() vowifi.IMSEvidence {
 	defer session.mu.Unlock()
 	evidence := cloneEvidence(session.evidence)
 	evidence.SMSDiagnostics = session.smsDiagnostics.snapshot()
+	if local, ok := session.conn.LocalAddr().(*net.TCPAddr); ok {
+		evidence.SMSDiagnostics.ProtectedTCPLocalPort = local.Port
+	}
+	if remote, ok := session.conn.RemoteAddr().(*net.TCPAddr); ok {
+		evidence.SMSDiagnostics.ProtectedTCPRemotePort = remote.Port
+	}
+	if session.protectedUDP != nil {
+		if local, ok := session.protectedUDP.LocalAddr().(*net.UDPAddr); ok {
+			evidence.SMSDiagnostics.ProtectedUDPLocalPort = local.Port
+		}
+	}
 	if session.closed {
 		evidence.Registered = false
 		evidence.RegistrationState = "closed"

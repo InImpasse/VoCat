@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/textproto"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -184,6 +185,16 @@ func TestSupportsSMSContentType(t *testing.T) {
 
 func TestSMSDiagnosticsCountMessageAndRPStages(t *testing.T) {
 	session := &Session{}
+	runtime := atomic.Bool{}
+	reader := protectedTCPReader{reader: strings.NewReader("setupdata"), diagnostics: &session.smsDiagnostics, runtime: &runtime}
+	buffer := make([]byte, 5)
+	if _, err := reader.Read(buffer); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Store(true)
+	if _, err := reader.Read(buffer); err != nil {
+		t.Fatal(err)
+	}
 	session.smsDiagnostics.recordTCPRead(10)
 	session.smsDiagnostics.recordUDPRead(20)
 	addSaturating(&session.smsDiagnostics.protectedTCPAccepts, 1)
@@ -194,7 +205,7 @@ func TestSMSDiagnosticsCountMessageAndRPStages(t *testing.T) {
 	session.smsDiagnostics.statusReports.Add(1)
 	session.smsDiagnostics.smsProcessed.Add(2)
 	got := session.smsDiagnostics.snapshot()
-	if got.ProtectedTCPReads != 1 || got.ProtectedTCPBytes != 10 || got.ProtectedTCPAccepts != 1 ||
+	if got.ProtectedTCPReads != 3 || got.ProtectedTCPBytes != 19 || got.RuntimeTCPReads != 1 || got.RuntimeTCPBytes != 4 || got.ProtectedTCPAccepts != 1 ||
 		got.ProtectedUDPReads != 1 || got.ProtectedUDPBytes != 20 || got.SIPPackets != 2 ||
 		got.SIPMessages != 2 || got.RPAck != 1 || got.RPData != 3 || got.StatusReports != 1 || got.SMSProcessed != 2 {
 		t.Fatalf("SMS diagnostics = %#v", got)

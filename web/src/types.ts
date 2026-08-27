@@ -49,10 +49,15 @@ export interface DataplaneDiagnostics {
 export interface SMSDiagnostics {
   protectedTcpReads: number;
   protectedTcpBytes: number;
+  runtimeTcpReads: number;
+  runtimeTcpBytes: number;
   protectedTcpAccepts: number;
   protectedUdpReads: number;
   protectedUdpBytes: number;
   sipPackets: number;
+  protectedTcpLocalPort: number;
+  protectedTcpRemotePort: number;
+  protectedUdpLocalPort: number;
   sipMessages: number;
   rpData: number;
   rpAck: number;

@@ -16,6 +16,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf16"
 
@@ -101,11 +102,15 @@ type sipTransactionKey struct {
 type protectedTCPReader struct {
 	reader      io.Reader
 	diagnostics *atomicSMSDiagnostics
+	runtime     *atomic.Bool
 }
 
 func (reader protectedTCPReader) Read(buffer []byte) (int, error) {
 	count, err := reader.reader.Read(buffer)
 	reader.diagnostics.recordTCPRead(count)
+	if reader.runtime != nil && reader.runtime.Load() {
+		reader.diagnostics.recordRuntimeTCPRead(count)
+	}
 	return count, err
 }
 
@@ -120,6 +125,7 @@ func (session *Session) startRuntimeReceivers() error {
 		_ = session.protectedUDP.SetReadDeadline(time.Time{})
 	}
 	session.runtimeStarted = true
+	session.runtimeSocketActive.Store(true)
 
 	session.receiveDone.Add(1)
 	go session.readMainConnection()
@@ -200,7 +206,7 @@ func (session *Session) readInboundTCP(connection net.Conn) {
 		session.inboundMu.Unlock()
 		_ = connection.Close()
 	}()
-	reader := bufio.NewReader(protectedTCPReader{reader: connection, diagnostics: &session.smsDiagnostics})
+	reader := bufio.NewReader(protectedTCPReader{reader: connection, diagnostics: &session.smsDiagnostics, runtime: &session.runtimeSocketActive})
 	for {
 		packet, err := readSIPPacket(reader)
 		if err != nil {

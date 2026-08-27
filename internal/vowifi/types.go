@@ -100,17 +100,22 @@ type DataplaneDiagnostics struct {
 }
 
 type SMSDiagnostics struct {
-	ProtectedTCPReads   uint64 `json:"protected_tcp_reads"`
-	ProtectedTCPBytes   uint64 `json:"protected_tcp_bytes"`
-	ProtectedTCPAccepts uint64 `json:"protected_tcp_accepts"`
-	ProtectedUDPReads   uint64 `json:"protected_udp_reads"`
-	ProtectedUDPBytes   uint64 `json:"protected_udp_bytes"`
-	SIPPackets          uint64 `json:"sip_packets"`
-	SIPMessages         uint64 `json:"sip_messages"`
-	RPData              uint64 `json:"rp_data"`
-	RPAck               uint64 `json:"rp_ack"`
-	StatusReports       uint64 `json:"status_reports"`
-	SMSProcessed        uint64 `json:"sms_processed"`
+	ProtectedTCPReads      uint64 `json:"protected_tcp_reads"`
+	ProtectedTCPBytes      uint64 `json:"protected_tcp_bytes"`
+	RuntimeTCPReads        uint64 `json:"runtime_tcp_reads"`
+	RuntimeTCPBytes        uint64 `json:"runtime_tcp_bytes"`
+	ProtectedTCPAccepts    uint64 `json:"protected_tcp_accepts"`
+	ProtectedUDPReads      uint64 `json:"protected_udp_reads"`
+	ProtectedUDPBytes      uint64 `json:"protected_udp_bytes"`
+	SIPPackets             uint64 `json:"sip_packets"`
+	ProtectedTCPLocalPort  int    `json:"protected_tcp_local_port"`
+	ProtectedTCPRemotePort int    `json:"protected_tcp_remote_port"`
+	ProtectedUDPLocalPort  int    `json:"protected_udp_local_port"`
+	SIPMessages            uint64 `json:"sip_messages"`
+	RPData                 uint64 `json:"rp_data"`
+	RPAck                  uint64 `json:"rp_ack"`
+	StatusReports          uint64 `json:"status_reports"`
+	SMSProcessed           uint64 `json:"sms_processed"`
 }
 
 // State is an immutable snapshot when returned by Orchestrator.State or a

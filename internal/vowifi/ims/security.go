@@ -890,7 +890,7 @@ func (session *Session) activateIPSec(
 
 	session.conn = connection
 	if session.transport == "tcp" {
-		session.reader = bufio.NewReader(protectedTCPReader{reader: connection, diagnostics: &session.smsDiagnostics})
+		session.reader = bufio.NewReader(protectedTCPReader{reader: connection, diagnostics: &session.smsDiagnostics, runtime: &session.runtimeSocketActive})
 	} else {
 		session.reader = nil
 	}
